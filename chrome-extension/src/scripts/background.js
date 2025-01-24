@@ -1,6 +1,16 @@
 const recentUrlChecks = new Map();
 const API_BASE_URL = 'http://localhost:8000/api';
 
+import { MultinomialNB } from 'sklearn.naive_bayes';
+import { SVC } from 'sklearn.svm';
+import { KNeighborsClassifier } from 'sklearn.neighbors';
+import joblib;
+
+const nbModel = joblib.load('text_classification_model_nb.joblib');
+const svmModel = joblib.load('text_classification_model_svm.joblib');
+const knnModel = joblib.load('text_classification_model_knn.joblib');
+const vectorizer = joblib.load('text_vectorizer.joblib');
+
 async function logErrorWithRetry(error, retryCount = 3) {
   for (let i = 0; i < retryCount; i++) {
     try {
@@ -87,6 +97,19 @@ function analyzeDomain(url) {
   }
 }
 
+function classifyText(text) {
+  const textVectorized = vectorizer.transform([text]);
+  const nbPrediction = nbModel.predict(textVectorized)[0];
+  const svmPrediction = svmModel.predict(textVectorized)[0];
+  const knnPrediction = knnModel.predict(textVectorized)[0];
+
+  return {
+    nbPrediction: parseInt(nbPrediction),
+    svmPrediction: parseInt(svmPrediction),
+    knnPrediction: parseInt(knnPrediction)
+  };
+}
+
 async function recordActivity(url, action, analysis = null) {
   if (url.startsWith('chrome-extension://') || url === 'about:blank') {
     return;
@@ -164,9 +187,11 @@ async function checkUrl(url, tabId) {
       return { blocked: true, analysis: data };
     }
 
+    const textClassification = classifyText(url);
     await recordActivity(url, 'allowed', {
       category: data.category || analysis.category,
-      riskLevel: data.risk_level || analysis.riskLevel
+      riskLevel: data.risk_level || analysis.riskLevel,
+      text_classification: textClassification
     });
     return { blocked: false, analysis: data };
   } catch (error) {

@@ -13,6 +13,12 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from pydantic import BaseModel
 
+# Importing the required models from sklearn
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+import joblib
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -57,6 +63,10 @@ class DashboardStats(BaseModel):
     daily_stats: Dict[str, int]
 
 model: Optional[URLClassifier] = None
+nb_model: Optional[MultinomialNB] = None
+svm_model: Optional[SVC] = None
+knn_model: Optional[KNeighborsClassifier] = None
+vectorizer: Optional[Any] = None
 
 def get_domain_category(url: str) -> str:
     try:
@@ -71,13 +81,40 @@ def get_domain_category(url: str) -> str:
     except:
         return 'Unknown'
 
+def classify_text(text: str) -> Dict[str, Any]:
+    """
+    Classify text using the loaded models.
+    """
+    global nb_model, svm_model, knn_model, vectorizer
+    if not all([nb_model, svm_model, knn_model, vectorizer]):
+        raise HTTPException(status_code=500, detail="Text classification models not loaded")
+
+    try:
+        text_vectorized = vectorizer.transform([text])
+        nb_prediction = nb_model.predict(text_vectorized)[0]
+        svm_prediction = svm_model.predict(text_vectorized)[0]
+        knn_prediction = knn_model.predict(text_vectorized)[0]
+
+        return {
+            "nb_prediction": int(nb_prediction),
+            "svm_prediction": int(svm_prediction),
+            "knn_prediction": int(knn_prediction)
+        }
+    except Exception as e:
+        logging.error(f"Error classifying text: {e}")
+        raise HTTPException(status_code=500, detail=f"Error classifying text: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Lifespan function to manage the FastAPI app lifecycle.
     """
-    global model
+    global model, nb_model, svm_model, knn_model, vectorizer
     model_path = 'ml/ai/models/url_classifier_final.pth'
+    nb_model_path = 'text_classification_model_nb.joblib'
+    svm_model_path = 'text_classification_model_svm.joblib'
+    knn_model_path = 'text_classification_model_knn.joblib'
+    vectorizer_path = 'text_vectorizer.joblib'
 
     # Create database tables
     Base.metadata.create_all(bind=engine)
@@ -92,10 +129,19 @@ async def lifespan(app: FastAPI):
         model = URLClassifier()
         model.load_state_dict(torch.load(model_path, weights_only=True))
         model.eval()
-        logging.info("Loaded pre-trained model.")
+        logging.info("Loaded pre-trained URL classification model.")
     except Exception as e:
-        logging.warning(f"Failed to load pre-trained model: {e}. Training a new model...")
+        logging.warning(f"Failed to load pre-trained URL classification model: {e}. Training a new model...")
         model = train()
+
+    try:
+        nb_model = joblib.load(nb_model_path)
+        svm_model = joblib.load(svm_model_path)
+        knn_model = joblib.load(knn_model_path)
+        vectorizer = joblib.load(vectorizer_path)
+        logging.info("Loaded pre-trained text classification models.")
+    except Exception as e:
+        logging.error(f"Failed to load pre-trained text classification models: {e}")
 
     yield
     logging.info("Shutting down the app.")
@@ -209,6 +255,9 @@ async def check_url(url: str = Form(...)) -> Dict[str, Any]:
         risk_level = "High" if probability > 0.8 else "Medium" if probability > 0.5 else "Low"
         category = get_domain_category(url)
 
+        # Classify the text content of the URL
+        text_classification = classify_text(url)
+
         # Store the check activity
         db = SessionLocal()
         activity = Activity(
@@ -228,7 +277,8 @@ async def check_url(url: str = Form(...)) -> Dict[str, Any]:
             "probability": float(probability),
             "risk_level": risk_level,
             "category": category,
-            "url": url
+            "url": url,
+            "text_classification": text_classification
         }
     except Exception as e:
         db = SessionLocal()
