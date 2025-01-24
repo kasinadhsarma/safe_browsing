@@ -46,15 +46,15 @@ const Dashboard = () => {
 
   const formatActionData = (activities: ActivityType[]) => {
     const timeGroups: { [key: string]: { blocked: number, allowed: number, visited: number } } = {}
-    
+
     activities.forEach(activity => {
       const hour = new Date(activity.timestamp).getHours()
       const timeKey = `${hour.toString().padStart(2, '0')}:00`
-      
+
       if (!timeGroups[timeKey]) {
         timeGroups[timeKey] = { blocked: 0, allowed: 0, visited: 0 }
       }
-      
+
       timeGroups[timeKey][activity.action as keyof typeof timeGroups[string]]++
     })
 
@@ -135,7 +135,7 @@ const Dashboard = () => {
             )} />
           </Button>
         </div>
-        
+
         <nav className="flex flex-col gap-2 p-4">
           {sidebarItems.map((item) => (
             <Button
@@ -220,9 +220,9 @@ const Dashboard = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold">{stats?.blocked_sites || 0}</div>
-                <Progress 
-                  value={stats ? (stats.blocked_sites / stats.total_sites) * 100 : 0} 
-                  className="mt-2" 
+                <Progress
+                  value={stats ? (stats.blocked_sites / stats.total_sites) * 100 : 0}
+                  className="mt-2"
                 />
               </CardContent>
             </Card>
@@ -236,9 +236,9 @@ const Dashboard = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold">{stats?.allowed_sites || 0}</div>
-                <Progress 
-                  value={stats ? (stats.allowed_sites / stats.total_sites) * 100 : 0} 
-                  className="mt-2" 
+                <Progress
+                  value={stats ? (stats.allowed_sites / stats.total_sites) * 100 : 0}
+                  className="mt-2"
                 />
               </CardContent>
             </Card>
@@ -252,9 +252,9 @@ const Dashboard = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold">{stats?.visited_sites || 0}</div>
-                <Progress 
-                  value={stats ? (stats.visited_sites / stats.total_sites) * 100 : 0} 
-                  className="mt-2" 
+                <Progress
+                  value={stats ? (stats.visited_sites / stats.total_sites) * 100 : 0}
+                  className="mt-2"
                 />
               </CardContent>
             </Card>
@@ -272,8 +272,8 @@ const Dashboard = () => {
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                     <XAxis dataKey="time" />
                     <YAxis />
-                    <Tooltip 
-                      contentStyle={{ 
+                    <Tooltip
+                      contentStyle={{
                         backgroundColor: 'var(--background)',
                         border: '1px solid var(--border)',
                         borderRadius: 'var(--radius)'

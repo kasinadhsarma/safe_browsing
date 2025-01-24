@@ -1,20 +1,20 @@
 const API_BASE_URL = "http://localhost:8000/api";
 
 export interface Activity {
-  url: string
-  timestamp: string
-  action: 'blocked' | 'allowed' 'visited' | 'checking' | 'error'
-  category?: string
-  risk_level?: string
+  url: string;
+  timestamp: string;
+  action: 'blocked' | 'allowed' | 'visited' | 'checking' | 'error';
+  category?: string;
+  risk_level?: string;
 }
 
 export interface DashboardStats {
-  total_sites: number
-  blocked_sites: number
-  allowed_sites: number
-  visited_sites: number
-  recent_activities: Activity[]
-  daily_stats: { [key: string]: number }
+  total_sites: number;
+  blocked_sites: number;
+  allowed_sites: number;
+  visited_sites: number;
+  recent_activities: Activity[];
+  daily_stats: { [key: string]: number };
 }
 
 class ApiError extends Error {
@@ -34,16 +34,11 @@ async function handleResponse<T>(response: Response): Promise<T> {
 
 export const urlService = {
   async checkUrl(url: string): Promise<{
-    blocked: boolean
-    probability: number
-    risk_level: string
-    category: string
-    url: string
-    text_classification: {
-      nb_prediction: number
-      svm_prediction: number
-      knn_prediction: number
-    }
+    blocked: boolean;
+    probability: number;
+    risk_level: string;
+    category: string;
+    url: string;
   }> {
     const formData = new FormData();
     formData.append('url', url);
@@ -67,10 +62,10 @@ export const urlService = {
   },
 
   async recordActivity(activity: {
-    url: string
-    action: string
-    category?: string
-    timestamp?: string
+    url: string;
+    action: string;
+    category?: string;
+    timestamp?: string;
   }): Promise<Activity> {
     const response = await fetch(`${API_BASE_URL}/activity`, {
       method: 'POST',
@@ -86,16 +81,6 @@ export const urlService = {
   async retrainModel(): Promise<{ status: string }> {
     const response = await fetch(`${API_BASE_URL}/retrain`, {
       method: 'POST',
-      headers: {
-        'Accept': 'application/json'
-      }
-    });
-
-    return handleResponse(response);
-  },
-
-  async fetchYouTubeActivity(): Promise<Activity[]> {
-    const response = await fetch(`${API_BASE_URL}/youtube-activity`, {
       headers: {
         'Accept': 'application/json'
       }

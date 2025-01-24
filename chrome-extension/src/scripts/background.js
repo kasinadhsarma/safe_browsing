@@ -1,16 +1,8 @@
+// Store for tracking recent URLs and their check times
 const recentUrlChecks = new Map();
 const API_BASE_URL = 'http://localhost:8000/api';
 
-import { MultinomialNB } from 'sklearn.naive_bayes';
-import { SVC } from 'sklearn.svm';
-import { KNeighborsClassifier } from 'sklearn.neighbors';
-import joblib;
-
-const nbModel = joblib.load('text_classification_model_nb.joblib');
-const svmModel = joblib.load('text_classification_model_svm.joblib');
-const knnModel = joblib.load('text_classification_model_knn.joblib');
-const vectorizer = joblib.load('text_vectorizer.joblib');
-
+// Function to log errors with retry mechanism
 async function logErrorWithRetry(error, retryCount = 3) {
   for (let i = 0; i < retryCount; i++) {
     try {
@@ -23,6 +15,7 @@ async function logErrorWithRetry(error, retryCount = 3) {
   }
 }
 
+// Function to normalize URL
 function normalizeUrl(url) {
   try {
     const urlObj = new URL(url);
@@ -33,40 +26,49 @@ function normalizeUrl(url) {
   }
 }
 
+// Function to get domain category based on content and URL patterns
 function analyzeDomain(url) {
   try {
     const urlObj = new URL(url);
     const hostname = urlObj.hostname;
     const path = urlObj.pathname;
 
+    // Social Media
     if (hostname.match(/(facebook|twitter|instagram|linkedin|tiktok|reddit|snapchat)\.(com|org)/i)) {
       return { category: 'Social Media', riskLevel: 'Medium' };
     }
 
+    // Video Platforms
     if (hostname.match(/(youtube|vimeo|twitch|netflix|disney|hulu)\.(com|tv)/i)) {
       return { category: 'Video', riskLevel: 'Medium' };
     }
 
+    // Educational
     if (hostname.match(/(coursera|udemy|edx|khanacademy|mit|edu)\.(org|com|edu)/i)) {
       return { category: 'Educational', riskLevel: 'Low' };
     }
 
+    // Gaming
     if (hostname.match(/(minecraft|roblox|fortnite|gaming|steam|epicgames)\.(com|net)/i)) {
       return { category: 'Gaming', riskLevel: 'Medium' };
     }
 
+    // News & Media
     if (hostname.match(/(news|cnn|bbc|nytimes|reuters)\.(com|org|net)/i)) {
       return { category: 'News', riskLevel: 'Low' };
     }
 
+    // AI & Chat
     if (hostname.match(/(chat\.openai|bard\.google|bing|claude)\.(com|ai)/i)) {
       return { category: 'AI Chat', riskLevel: 'Medium' };
     }
 
+    // Search Engines
     if (hostname.match(/(google|bing|yahoo|duckduckgo)\.(com|org)/i)) {
       return { category: 'Search', riskLevel: 'Low' };
     }
 
+    // Check for potential risks in URL
     const riskPatterns = {
       gambling: /(gambling|casino|bet|poker|lottery)\.(com|net)/i,
       adult: /(adult|xxx|porn|sex)\.(com|net)/i,
@@ -80,6 +82,7 @@ function analyzeDomain(url) {
       }
     }
 
+    // Default categorization based on TLD
     if (hostname.endsWith('.edu')) {
       return { category: 'Educational', riskLevel: 'Low' };
     }
@@ -97,19 +100,7 @@ function analyzeDomain(url) {
   }
 }
 
-function classifyText(text) {
-  const textVectorized = vectorizer.transform([text]);
-  const nbPrediction = nbModel.predict(textVectorized)[0];
-  const svmPrediction = svmModel.predict(textVectorized)[0];
-  const knnPrediction = knnModel.predict(textVectorized)[0];
-
-  return {
-    nbPrediction: parseInt(nbPrediction),
-    svmPrediction: parseInt(svmPrediction),
-    knnPrediction: parseInt(knnPrediction)
-  };
-}
-
+// Record activity to backend and local storage
 async function recordActivity(url, action, analysis = null) {
   if (url.startsWith('chrome-extension://') || url === 'about:blank') {
     return;
@@ -125,6 +116,7 @@ async function recordActivity(url, action, analysis = null) {
   };
 
   try {
+    // Send to backend
     const response = await fetch(`${API_BASE_URL}/activity`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -133,6 +125,7 @@ async function recordActivity(url, action, analysis = null) {
 
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
+    // Store locally
     chrome.storage.local.get(['browsing_activity'], (result) => {
       const activities = result.browsing_activity || [];
       activities.unshift(activity);
@@ -141,6 +134,7 @@ async function recordActivity(url, action, analysis = null) {
     });
   } catch (error) {
     await logErrorWithRetry(error);
+    // Store locally on error
     chrome.storage.local.get(['browsing_activity'], (result) => {
       const activities = result.browsing_activity || [];
       activities.unshift(activity);
@@ -150,16 +144,19 @@ async function recordActivity(url, action, analysis = null) {
   }
 }
 
+// Check URL against backend and local rules
 async function checkUrl(url, tabId) {
   try {
     const analysis = analyzeDomain(url);
     await recordActivity(url, 'checking', analysis);
 
+    // Check high-risk URLs immediately
     if (analysis.riskLevel === 'High') {
       await recordActivity(url, 'blocked', analysis);
       return { blocked: true, analysis };
     }
 
+    // Check with backend
     const formData = new FormData();
     formData.append('url', url);
 
@@ -178,6 +175,7 @@ async function checkUrl(url, tabId) {
         riskLevel: data.risk_level || analysis.riskLevel
       });
 
+      // Show blocked page
       const blockedUrl = chrome.runtime.getURL('src/blocked.html') +
         `?url=${encodeURIComponent(url)}` +
         `&category=${encodeURIComponent(data.category || analysis.category)}` +
@@ -187,11 +185,9 @@ async function checkUrl(url, tabId) {
       return { blocked: true, analysis: data };
     }
 
-    const textClassification = classifyText(url);
     await recordActivity(url, 'allowed', {
       category: data.category || analysis.category,
-      riskLevel: data.risk_level || analysis.riskLevel,
-      text_classification: textClassification
+      riskLevel: data.risk_level || analysis.riskLevel
     });
     return { blocked: false, analysis: data };
   } catch (error) {
@@ -201,6 +197,7 @@ async function checkUrl(url, tabId) {
   }
 }
 
+// Monitor tab updates
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.url) {
     console.log('Checking URL:', changeInfo.url);
@@ -208,16 +205,19 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 });
 
+// Monitor web navigation
 chrome.webNavigation.onCommitted.addListener(async (details) => {
-  if (details.frameId === 0 && details.url) {
+  if (details.frameId === 0 && details.url) {  // Main frame only
     await recordActivity(details.url, 'visited');
   }
 });
 
+// Monitor history
 chrome.history.onVisited.addListener(async (historyItem) => {
   await recordActivity(historyItem.url, 'history');
 });
 
+// Sync with backend periodically
 async function syncWithBackend() {
   try {
     const response = await fetch(`${API_BASE_URL}/dashboard/stats`);
@@ -230,13 +230,16 @@ async function syncWithBackend() {
   }
 }
 
-chrome.alarms.create('syncAlarm', { periodInMinutes: 0.5 });
+// Set up periodic sync
+chrome.alarms.create('syncAlarm', { periodInMinutes: 0.5 });  // Every 30 seconds
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'syncAlarm') {
     syncWithBackend();
   }
 });
 
+// Initial sync
 syncWithBackend();
 
+// Log startup
 console.log('Safe Browsing extension initialized');
