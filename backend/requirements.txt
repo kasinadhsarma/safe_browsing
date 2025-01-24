@@ -1,0 +1,9 @@
+fastapi==0.103.1
+uvicorn==0.23.2
+sqlalchemy==2.0.20
+torch==2.0.1
+pydantic==2.3.0
+python-multipart==0.0.6
+python-form==0.2.3
+starlette==0.27.0
+loguru==0.7.0

@@ -4,16 +4,12 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
-import { Shield, Clock, AlertTriangle, ChevronLeft, LogOut, Settings, Home, Search, Activity, Lock } from 'lucide-react'
+import { Shield, Clock, AlertTriangle, ChevronLeft, LogOut, Settings, Home, Search, Activity } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,11 +18,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { SafeNetLogo } from '@/components/safenet-logo'
 import { cn } from "@/lib/utils"
-import Link from 'next/link'
-
-const springConfig = "cubic-bezier(0.87, 0, 0.13, 1)"
+import { urlService, Activity as ActivityType, DashboardStats } from '../api/urlService'
 
 const sidebarItems = [
   { icon: Home, label: 'Overview', id: 'overview' },
@@ -34,73 +29,59 @@ const sidebarItems = [
   { icon: AlertTriangle, label: 'Alerts', id: 'alerts' },
 ]
 
+const actionColors = {
+  blocked: 'destructive',
+  allowed: 'default',
+  visited: 'secondary',
+  checking: 'outline'
+} as const
+
 const Dashboard = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [activeSection, setActiveSection] = useState('overview')
-  const [blockedSites, setBlockedSites] = useState([
-    { url: 'example.com', method: 'ML Classification', date: '2024-01-24', risk: 'High' },
-    { url: 'unsafe-site.com', method: 'ML Classification', date: '2024-01-24', risk: 'High' }
-  ])
-  const [newSite, setNewSite] = useState("")
-  const [stats, setStats] = useState({
-    sitesBlocked: 2,
-    threatsDetected: 0,
-    safeSearches: 0,
-    lastUpdated: new Date().toLocaleTimeString()
-  })
-  const [mlStatus, setMlStatus] = useState({
-    knn: 95,
-    svm: 92,
-    naiveBayes: 88,
-    lastCheck: new Date().toLocaleTimeString()
-  })
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
-  const [activityData] = useState([
-    { time: '00:00', threats: 4, searches: 12 },
-    { time: '04:00', threats: 2, searches: 8 },
-    { time: '08:00', threats: 8, searches: 15 },
-    { time: '12:00', threats: 6, searches: 20 },
-    { time: '16:00', threats: 5, searches: 18 },
-    { time: '20:00', threats: 3, searches: 10 },
-  ])
+  const formatActionData = (activities: ActivityType[]) => {
+    const timeGroups: { [key: string]: { blocked: number, allowed: number, visited: number } } = {}
+    
+    activities.forEach(activity => {
+      const hour = new Date(activity.timestamp).getHours()
+      const timeKey = `${hour.toString().padStart(2, '0')}:00`
+      
+      if (!timeGroups[timeKey]) {
+        timeGroups[timeKey] = { blocked: 0, allowed: 0, visited: 0 }
+      }
+      
+      timeGroups[timeKey][activity.action as keyof typeof timeGroups[string]]++
+    })
+
+    return Object.entries(timeGroups).map(([time, data]) => ({
+      time,
+      ...data
+    }))
+  }
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setMlStatus(prev => ({
-        knn: Math.min(100, prev.knn + Math.random() * 2 - 1),
-        svm: Math.min(100, prev.svm + Math.random() * 2 - 1),
-        naiveBayes: Math.min(100, prev.naiveBayes + Math.random() * 2 - 1),
-        lastCheck: new Date().toLocaleTimeString()
-      }))
-    }, 5000)
+    const fetchStats = async () => {
+      try {
+        const data = await urlService.getDashboardStats()
+        setStats(data)
+      } catch (error) {
+        console.error('Error fetching dashboard stats:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
 
+    fetchStats()
+    // Poll for updates every 30 seconds
+    const interval = setInterval(fetchStats, 30000)
     return () => clearInterval(interval)
   }, [])
 
-  const handleAddSite = () => {
-    if (newSite && !blockedSites.find(site => site.url === newSite)) {
-      setBlockedSites([...blockedSites, {
-        url: newSite,
-        method: 'ML Classification',
-        date: new Date().toISOString().split('T')[0],
-        risk: 'High'
-      }])
-      setNewSite("")
-      setStats(prev => ({
-        ...prev,
-        sitesBlocked: prev.sitesBlocked + 1,
-        lastUpdated: new Date().toLocaleTimeString()
-      }))
-    }
-  }
-
-  const handleRemoveSite = (url) => {
-    setBlockedSites(blockedSites.filter(site => site.url !== url))
-    setStats(prev => ({
-      ...prev,
-      sitesBlocked: prev.sitesBlocked - 1,
-      lastUpdated: new Date().toLocaleTimeString()
-    }))
+  if (isLoading) {
+    return <div className="flex h-screen items-center justify-center">Loading...</div>
   }
 
   return (
@@ -208,12 +189,12 @@ const Dashboard = () => {
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center space-x-2">
                   <Shield className="h-4 w-4" />
-                  <span>Sites Blocked</span>
+                  <span>Total Sites</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{stats.sitesBlocked}</div>
-                <Progress value={75} className="mt-2" />
+                <div className="text-3xl font-bold">{stats?.total_sites || 0}</div>
+                <Progress value={100} className="mt-2" />
               </CardContent>
             </Card>
 
@@ -221,12 +202,15 @@ const Dashboard = () => {
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center space-x-2">
                   <AlertTriangle className="h-4 w-4" />
-                  <span>Threats Detected</span>
+                  <span>Sites Blocked</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{stats.threatsDetected}</div>
-                <Progress value={45} className="mt-2" />
+                <div className="text-3xl font-bold">{stats?.blocked_sites || 0}</div>
+                <Progress 
+                  value={stats ? (stats.blocked_sites / stats.total_sites) * 100 : 0} 
+                  className="mt-2" 
+                />
               </CardContent>
             </Card>
 
@@ -234,12 +218,15 @@ const Dashboard = () => {
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center space-x-2">
                   <Search className="h-4 w-4" />
-                  <span>Safe Searches</span>
+                  <span>Sites Allowed</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{stats.safeSearches}</div>
-                <Progress value={90} className="mt-2" />
+                <div className="text-3xl font-bold">{stats?.allowed_sites || 0}</div>
+                <Progress 
+                  value={stats ? (stats.allowed_sites / stats.total_sites) * 100 : 0} 
+                  className="mt-2" 
+                />
               </CardContent>
             </Card>
 
@@ -247,14 +234,15 @@ const Dashboard = () => {
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center space-x-2">
                   <Activity className="h-4 w-4" />
-                  <span>ML Model Health</span>
+                  <span>Sites Visited</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">
-                  {((mlStatus.knn + mlStatus.svm + mlStatus.naiveBayes) / 3).toFixed(1)}%
-                </div>
-                <Progress value={92} className="mt-2" />
+                <div className="text-3xl font-bold">{stats?.visited_sites || 0}</div>
+                <Progress 
+                  value={stats ? (stats.visited_sites / stats.total_sites) * 100 : 0} 
+                  className="mt-2" 
+                />
               </CardContent>
             </Card>
           </div>
@@ -267,7 +255,7 @@ const Dashboard = () => {
             <CardContent>
               <div className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={activityData}>
+                  <LineChart data={stats ? formatActionData(stats.recent_activities) : []}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                     <XAxis dataKey="time" />
                     <YAxis />
@@ -279,143 +267,57 @@ const Dashboard = () => {
                       }}
                     />
                     <Legend />
-                    <Line type="monotone" dataKey="threats" stroke="var(--destructive)" strokeWidth={2} />
-                    <Line type="monotone" dataKey="searches" stroke="var(--primary)" strokeWidth={2} />
+                    <Line type="monotone" name="Blocked" dataKey="blocked" stroke="var(--destructive)" strokeWidth={2} />
+                    <Line type="monotone" name="Allowed" dataKey="allowed" stroke="var(--primary)" strokeWidth={2} />
+                    <Line type="monotone" name="Visited" dataKey="visited" stroke="var(--muted-foreground)" strokeWidth={2} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             </CardContent>
           </Card>
 
-          <Tabs defaultValue="sites" className="space-y-4">
-            <TabsList className="grid w-[400px] grid-cols-2">
-              <TabsTrigger value="sites">Blocked Sites</TabsTrigger>
-              <TabsTrigger value="ml">ML Models</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="sites">
-              <div className="grid gap-4">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Add Blocked Website</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex space-x-2">
-                      <div className="flex-grow">
-                        <Label htmlFor="newSite" className="sr-only">New site to block</Label>
-                        <Input
-                          id="newSite"
-                          value={newSite}
-                          onChange={(e) => setNewSite(e.target.value)}
-                          placeholder="Enter website URL"
-                          className="w-full"
-                        />
-                      </div>
-                      <Button onClick={handleAddSite} className="flex items-center space-x-2">
-                        <Lock className="h-4 w-4" />
-                        <span>Block Site</span>
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Blocked Websites</CardTitle>
-                    <CardDescription>
-                      Currently blocked: {blockedSites.length} sites
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Website</TableHead>
-                          <TableHead>Detection Method</TableHead>
-                          <TableHead>Blocked Since</TableHead>
-                          <TableHead>Risk Level</TableHead>
-                          <TableHead className="text-right">Action</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {blockedSites.map((site) => (
-                          <TableRow key={site.url}>
-                            {/* Continuing from previous code */}
-                            <TableCell>{site.method}</TableCell>
-                            <TableCell>{site.date}</TableCell>
-                            <TableCell>
-                              <Badge variant="destructive">{site.risk}</Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Button 
-                                variant="destructive" 
-                                size="sm"
-                                onClick={() => handleRemoveSite(site.url)}
-                              >
-                                Remove
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </CardContent>
-                </Card>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="ml">
-              <Card>
-                <CardHeader>
-                  <CardTitle>ML Model Performance</CardTitle>
-                  <CardDescription>
-                    Last check: {mlStatus.lastCheck}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <Label>K-Nearest Neighbor</Label>
-                      <span className="text-sm font-medium">{mlStatus.knn.toFixed(1)}%</span>
-                    </div>
-                    <Progress value={mlStatus.knn} className="h-2" />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <Label>Support Vector Machine</Label>
-                      <span className="text-sm font-medium">{mlStatus.svm.toFixed(1)}%</span>
-                    </div>
-                    <Progress value={mlStatus.svm} className="h-2" />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <Label>Naive Bayes Classifier</Label>
-                      <span className="text-sm font-medium">{mlStatus.naiveBayes.toFixed(1)}%</span>
-                    </div>
-                    <Progress value={mlStatus.naiveBayes} className="h-2" />
-                  </div>
-
-                  <div className="mt-4 p-4 bg-muted rounded-lg">
-                    <h4 className="font-semibold mb-2">Model Usage</h4>
-                    <ul className="space-y-2 text-sm">
-                      <li>• KNN: URL classification and pattern detection</li>
-                      <li>• SVM: Content analysis and categorization</li>
-                      <li>• Naive Bayes: Image and text classification</li>
-                    </ul>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
+          <Card>
+            <CardHeader>
+              <CardTitle>Recent Activity</CardTitle>
+              <CardDescription>Latest browsing activities</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Website</TableHead>
+                    <TableHead>Action</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Risk Level</TableHead>
+                    <TableHead>Time</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {stats?.recent_activities.map((activity: ActivityType, index: number) => (
+                    <TableRow key={index}>
+                      <TableCell className="font-medium">{activity.url}</TableCell>
+                      <TableCell>
+                        <Badge variant={actionColors[activity.action as keyof typeof actionColors]}>
+                          {activity.action}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{activity.category || 'Unknown'}</TableCell>
+                      <TableCell>{activity.risk_level || 'N/A'}</TableCell>
+                      <TableCell>
+                        {new Date(activity.timestamp).toLocaleTimeString()}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
 
           <Alert>
             <AlertDescription className="flex items-center space-x-2">
               <Activity className="h-4 w-4" />
               <span>
-                Active protection: KNN (URL classification), SVM (content analysis), 
-                and Naive Bayes (image detection) working together to keep browsing safe
+                Active monitoring: Tracking site visits, safety checks, and blocking attempts in real-time
               </span>
             </AlertDescription>
           </Alert>

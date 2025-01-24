@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "Safe Browsing for Kids",
+  "version": "1.0",
+  "description": "A safe browsing extension for kids using machine learning",
+  "icons": {
+    "16": "src/icons/icon16.png",
+    "48": "src/icons/icon48.png",
+    "64": "src/icons/icon64.png",
+    "128": "src/icons/icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "declarativeNetRequest",
+    "tabs",
+    "history",
+    "webNavigation",
+    "alarms",
+    "webRequest",
+    "webRequestBlocking"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "background": {
+    "service_worker": "src/scripts/background.js"
+  },
+  "action": {
+    "default_popup": "src/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/scripts/content.js"]
+    }
+  ],
+  "web_accessible_resources": [{
+    "resources": [
+      "src/icons/*",
+      "src/blocked.html"
+    ],
+    "matches": ["<all_urls>"]
+  }]
+}
