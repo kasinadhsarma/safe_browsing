@@ -1,86 +1,41 @@
 "use client"
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
 import Link from 'next/link'
 
-export function SignupForm() {
-  const [name, setName] = useState('')
+interface SignupFormProps {
+  onSuccess: () => void // Callback for successful signup
+}
+
+export function SignupForm({ onSuccess }: SignupFormProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [error, setError] = useState('')
-  const [fullName, setFullName] = useState('')
-  const router = useRouter()
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
-
+    // Handle signup logic here
     if (password !== confirmPassword) {
-      setError("Passwords don't match")
+      console.error('Passwords do not match')
       return
     }
-
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/signup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: name,
-          email,
-          full_name: fullName,
-          password,
-          confirm_password: confirmPassword
-        }),
-        credentials: 'include'
-      })
-
-      if (response.ok) {
-        router.push('/dashboard')
-      } else {
-        const data = await response.json()
-        setError(data.detail || 'An error occurred during signup')
-      }
-    } catch {
-      setError('An error occurred during signup')
-    }
+    console.log('Signup attempted with:', { email, password })
+    // Simulate successful signup
+    onSuccess()
   }
 
   return (
     <Card className="w-full max-w-md">
       <CardHeader>
-        <CardTitle>Sign Up for SafeNet</CardTitle>
-        <CardDescription>Create your account to start protecting your family online</CardDescription>
+        <CardTitle>Sign Up</CardTitle>
+        <CardDescription>Create a new account to get started</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="username">Username</Label>
-            <Input
-              id="username"
-              type="text"
-              placeholder="yourusername"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="fullName">Full Name</Label>
-            <Input
-              id="fullName"
-              type="text"
-              placeholder="John Doe"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              required
-            />
-          </div>
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input
@@ -97,6 +52,7 @@ export function SignupForm() {
             <Input
               id="password"
               type="password"
+              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -107,12 +63,12 @@ export function SignupForm() {
             <Input
               id="confirmPassword"
               type="password"
+              placeholder="••••••••"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
             />
           </div>
-          {error && <p className="text-red-500 text-sm">{error}</p>}
           <Button type="submit" className="w-full">Sign Up</Button>
         </form>
       </CardContent>

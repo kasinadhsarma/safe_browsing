@@ -19,30 +19,17 @@ export default function AuthPage() {
     }
   }, [searchParams])
 
-  useEffect(() => {
-    const fetchAdvancedMode = async () => {
-      try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/check`, {
-          credentials: 'include',
-          headers: {
-            'X-Advanced-Mode': 'true'
-          }
-        })
-        if (response.ok) {
-          // const data = await response.json()
-          // fetchAdvancedMode(data.advancedMode) // Removed unnecessary call
-        }
-      } catch (error) {
-        console.error('Error fetching advanced mode:', error)
-      }
-    }
-
-    fetchAdvancedMode()
-  }, [])
-
   const handleTabChange = (value: string) => {
     setActiveTab(value)
     router.push(`/auth?tab=${value}`, { scroll: false })
+  }
+
+  const handleLoginSuccess = () => {
+    router.push('/dashboard')
+  }
+
+  const handleSignupSuccess = () => {
+    router.push('/dashboard')
   }
 
   return (
@@ -54,10 +41,10 @@ export default function AuthPage() {
           <TabsTrigger value="forgot-password">Forgot Password</TabsTrigger>
         </TabsList>
         <TabsContent value="signup">
-          <SignupForm />
+          <SignupForm onSuccess={handleSignupSuccess} />
         </TabsContent>
         <TabsContent value="login">
-          <LoginForm />
+          <LoginForm onSuccess={handleLoginSuccess} />
         </TabsContent>
         <TabsContent value="forgot-password">
           <ForgotPasswordForm />

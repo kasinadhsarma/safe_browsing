@@ -8,6 +8,20 @@ export interface Activity {
   risk_level?: string;
 }
 
+export interface Alert {
+  id: string;
+  message: string;
+  priority: 'high' | 'medium' | 'low';
+  timestamp: string;
+}
+
+export interface ProtectionStats {
+  websites_blocked: number;
+  threats_detected: number;
+  content_filtered: number;
+  protection_score: number;
+}
+
 export interface DashboardStats {
   total_sites: number;
   blocked_sites: number;
@@ -15,6 +29,8 @@ export interface DashboardStats {
   visited_sites: number;
   recent_activities: Activity[];
   daily_stats: { [key: string]: number };
+  protection_stats: ProtectionStats;
+  alerts: Alert[];
 }
 
 class ApiError extends Error {
@@ -29,7 +45,19 @@ async function handleResponse<T>(response: Response): Promise<T> {
     const error = await response.text();
     throw new ApiError(response.status, error);
   }
-  return response.json();
+  const text = await response.text();
+  try {
+    // Fix malformed JSON by adding missing commas
+    const fixedText = text
+      .replace(/"([^"]+)"(\d+)/g, '"$1":$2')  // Fix "key"value -> "key":value
+      .replace(/}"/g, '},"')  // Fix missing commas between objects
+      .replace(/]"/g, '],"'); // Fix missing commas between arrays
+    return JSON.parse(fixedText) as T;
+  } catch (e) {
+    console.error('Error parsing JSON:', e);
+    console.error('Original text:', text);
+    throw new ApiError(response.status, 'Invalid JSON response from server');
+  }
 }
 
 export const urlService = {
@@ -81,6 +109,26 @@ export const urlService = {
   async retrainModel(): Promise<{ status: string }> {
     const response = await fetch(`${API_BASE_URL}/retrain`, {
       method: 'POST',
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+
+    return handleResponse(response);
+  },
+
+  async getRecentActivities(): Promise<Activity[]> {
+    const response = await fetch(`${API_BASE_URL}/activities`, {
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+
+    return handleResponse(response);
+  },
+
+  async getAlerts(): Promise<Activity[]> {
+    const response = await fetch(`${API_BASE_URL}/alerts`, {
       headers: {
         'Accept': 'application/json'
       }

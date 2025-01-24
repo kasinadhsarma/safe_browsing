@@ -1,6 +1,6 @@
 function formatNumber(num) {
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
+};
 
 function formatRelativeTime(timestamp) {
   const now = new Date();
@@ -15,7 +15,7 @@ function formatRelativeTime(timestamp) {
 
   const diffDays = Math.floor(diffHours / 24);
   return `${diffDays}d ago`;
-}
+};
 
 function getRiskLevelClass(level) {
   switch (level?.toLowerCase()) {
@@ -24,7 +24,7 @@ function getRiskLevelClass(level) {
     case 'low': return 'risk-low';
     default: return 'risk-unknown';
   }
-}
+};
 
 function getActionClass(action) {
   switch (action) {
@@ -35,13 +35,13 @@ function getActionClass(action) {
     case 'checking': return 'bg-yellow-100 text-yellow-700';
     default: return 'bg-gray-100 text-gray-700';
   }
-}
+};
 
 function getTrendIcon(value, threshold) {
   if (value > threshold) return '↑';
   if (value < threshold) return '↓';
   return '→';
-}
+};
 
 function formatUrl(url) {
   try {
@@ -50,7 +50,7 @@ function formatUrl(url) {
   } catch (e) {
     return url;
   }
-}
+};
 
 function updateStats() {
   chrome.storage.local.get(['dashboard_stats', 'browsing_activity'], (result) => {
@@ -105,7 +105,7 @@ function updateStats() {
         .join('');
     }
   });
-}
+};
 
 function updateRiskDistribution(riskLevels) {
   const container = document.getElementById('risk-distribution');
@@ -122,13 +122,13 @@ function updateRiskDistribution(riskLevels) {
           <span class="text-xs">${percentage}%</span>
         </div>
         <div class="h-1 bg-gray-200 rounded">
-          <div class="h-full ${getRiskLevelClass(level)} rounded" 
+          <div class="h-full ${getRiskLevelClass(level)} rounded"
                style="width: ${percentage}%"></div>
         </div>
       `;
     })
     .join('');
-}
+};
 
 // Set up filter controls
 document.addEventListener('DOMContentLoaded', () => {
@@ -203,4 +203,4 @@ function updateActivityList(activities) {
       `)
       .join('');
   }
-}
+};

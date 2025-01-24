@@ -48,22 +48,22 @@
 <body>
   <div class="container">
     <img src="icons/icon64.png" alt="SafeNet Logo" class="icon">
-    <h1>⚠️ Access Blocked</h1>
-    <p>This website has been blocked for your safety.</p>
-    <div class="details">
-      <div><strong>URL:</strong> <span id="blocked-url" class="url"></span></div>
-      <div><strong>Category:</strong> <span id="category"></span></div>
-      <div><strong>Risk Level:</strong> <span id="risk-level"></span></div>
-    </div>
+<h1>⚠️ Access Blocked</h1>
+<p>This website has been blocked for your safety.</p>
+<div class="details">
+  <div><strong>URL:</strong> <span id="blocked-url" class="url"></span></div>
+  <div><strong>Category:</strong> <span id="category"></span></div>
+  <div><strong>Risk Level:</strong> <span id="risk-level"></span></div>
+</div>
+<script>
+  const params = new URLSearchParams(window.location.search);
+  document.getElementById('blocked-url').textContent = params.get('url') || 'Unknown';
+  document.getElementById('category').textContent = params.get('category') || 'Unknown';
+  const riskLevel = params.get('risk') || 'Unknown';
+  const riskElement = document.getElementById('risk-level');
+  riskElement.textContent = riskLevel;
+  riskElement.className = `risk-${riskLevel.toLowerCase()}`;
+</script>
   </div>
-  <script>
-    const params = new URLSearchParams(window.location.search);
-    document.getElementById('blocked-url').textContent = params.get('url') || 'Unknown';
-    document.getElementById('category').textContent = params.get('category') || 'Unknown';
-    const riskLevel = params.get('risk') || 'Unknown';
-    const riskElement = document.getElementById('risk-level');
-    riskElement.textContent = riskLevel;
-    riskElement.className = `risk-${riskLevel.toLowerCase()}`;
-  </script>
 </body>
 </html>

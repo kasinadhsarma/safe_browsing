@@ -4,132 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Safe Browsing Activity</title>
-  <style>
-    body {
-      width: 380px;
-      min-height: 400px;
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      background: #f9fafb;
-    }
-    .container {
-      padding: 16px;
-    }
-    .header {
-      display: flex;
-      align-items: center;
-      margin-bottom: 16px;
-      padding: 8px 16px;
-      background: white;
-      border-bottom: 1px solid #e5e7eb;
-    }
-    .header img {
-      width: 24px;
-      height: 24px;
-      margin-right: 8px;
-    }
-    .title {
-      font-size: 16px;
-      font-weight: 600;
-      color: #1f2937;
-    }
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 8px;
-      margin-bottom: 16px;
-    }
-    .stat-card {
-      background: white;
-      padding: 12px;
-      border-radius: 8px;
-      border: 1px solid #e5e7eb;
-    }
-    .stat-value {
-      font-size: 20px;
-      font-weight: 600;
-      color: #1f2937;
-    }
-    .stat-label {
-      font-size: 12px;
-      color: #6b7280;
-    }
-    .risk-high { color: #dc2626; }
-    .risk-medium { color: #d97706; }
-    .risk-low { color: #059669; }
-    .risk-unknown { color: #6b7280; }
-    .activity-section {
-      background: white;
-      border-radius: 8px;
-      border: 1px solid #e5e7eb;
-      margin-bottom: 16px;
-    }
-    .section-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 16px;
-      border-bottom: 1px solid #e5e7eb;
-    }
-    .section-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: #374151;
-    }
-    .filters {
-      display: flex;
-      gap: 8px;
-      padding: 8px 16px;
-      border-bottom: 1px solid #e5e7eb;
-      background: #f8fafc;
-      overflow-x: auto;
-    }
-    .filter-btn {
-      font-size: 12px;
-      padding: 4px 8px;
-      border-radius: 4px;
-      border: 1px solid #e5e7eb;
-      background: white;
-      cursor: pointer;
-    }
-    .filter-btn.active {
-      background: #2563eb;
-      color: white;
-      border-color: #2563eb;
-    }
-    .category-tag {
-      font-size: 11px;
-      padding: 1px 6px;
-      border-radius: 4px;
-      background: #f3f4f6;
-    }
-    .view-all {
-      display: block;
-      text-align: center;
-      padding: 8px;
-      background: #2563eb;
-      color: white;
-      text-decoration: none;
-      border-radius: 6px;
-      font-weight: 500;
-      margin-top: 16px;
-    }
-    .view-all:hover {
-      background: #1d4ed8;
-    }
-    /* Action status colors */
-    .bg-red-100 { background: #fee2e2; }
-    .bg-green-100 { background: #dcfce7; }
-    .bg-blue-100 { background: #dbeafe; }
-    .bg-yellow-100 { background: #fef9c3; }
-    .bg-purple-100 { background: #f3e8ff; }
-    .text-red-700 { color: #b91c1c; }
-    .text-green-700 { color: #15803d; }
-    .text-blue-700 { color: #1d4ed8; }
-    .text-yellow-700 { color: #a16207; }
-    .text-purple-700 { color: #7e22ce; }
-  </style>
 </head>
+<link rel="stylesheet" href="styles/popup.css">
 <body>
   <div class="header">
     <img src="icons/icon48.png" alt="SafeNet Logo">
@@ -174,7 +50,7 @@
       <div class="section-header">
         <span class="section-title">Risk Distribution</span>
       </div>
-      <div id="risk-distribution" style="padding: 12px;"></div>
+      <div id="risk-distribution" class="risk-distribution"></div>
     </div>
 
     <a href="/app/activity" target="_blank" class="view-all">View Full Activity</a>

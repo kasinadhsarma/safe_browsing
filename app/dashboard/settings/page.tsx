@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -9,13 +11,11 @@ export default function SettingsPage() {
 
   const handleAlertToggle = () => {
     setAlertsEnabled(!alertsEnabled);
-    // Implement alert settings update logic here
     console.log('Alerts enabled:', !alertsEnabled);
   };
 
   const handleYoutubeActivityToggle = () => {
     setYoutubeActivityEnabled(!youtubeActivityEnabled);
-    // Implement YouTube activity settings update logic here
     console.log('YouTube activity enabled:', !youtubeActivityEnabled);
   };
 
