@@ -19,10 +19,10 @@ const actionColors = {
 
 export default function ActivityPage() {
   const [activities, setActivities] = useState<Activity[]>([])
-  const [filter, setFilter] = useState<Activity['action'] | 'all'>('all')
+  const [filter, setFilter] = useState<Activity['action'] | 'all' | 'youtube'>('all')
   
   const filteredActivities = activities.filter(activity => 
-    filter === 'all' ? true : activity.action === filter
+    filter === 'all' ? true : filter === 'youtube' ? activity.url.includes('youtube.com') : activity.action === filter
   )
 
   useEffect(() => {
@@ -60,7 +60,7 @@ export default function ActivityPage() {
           <select 
             id="activity-filter"
             value={filter}
-            onChange={(e) => setFilter(e.target.value as Activity['action'] | 'all')}
+            onChange={(e) => setFilter(e.target.value as Activity['action'] | 'all' | 'youtube')}
             className="px-3 py-2 border rounded-md bg-white"
             aria-label="Filter activities"
           >
@@ -69,6 +69,7 @@ export default function ActivityPage() {
             <option value="blocked">Blocked Sites</option>
             <option value="allowed">Allowed Sites</option>
             <option value="checking">Being Checked</option>
+            <option value="youtube">YouTube Activity</option>
           </select>
         </div>
       </div>

@@ -27,6 +27,7 @@ const sidebarItems = [
   { icon: Home, label: 'Overview', id: 'overview' },
   { icon: Clock, label: 'Activity', id: 'activity' },
   { icon: AlertTriangle, label: 'Alerts', id: 'alerts' },
+  { icon: Settings, label: 'Settings', id: 'settings' }, // P37c2
 ]
 
 const actionColors = {
@@ -41,6 +42,7 @@ const Dashboard = () => {
   const [activeSection, setActiveSection] = useState('overview')
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [alertsEnabled, setAlertsEnabled] = useState(false) // Pcb3a
 
   const formatActionData = (activities: ActivityType[]) => {
     const timeGroups: { [key: string]: { blocked: number, allowed: number, visited: number } } = {}
@@ -79,6 +81,17 @@ const Dashboard = () => {
     const interval = setInterval(fetchStats, 30000)
     return () => clearInterval(interval)
   }, [])
+
+  const handleLogout = () => {
+    // Implement logout functionality here
+    console.log('User logged out') // P920f
+  }
+
+  const handleAlertToggle = () => {
+    setAlertsEnabled(!alertsEnabled)
+    // Implement alert settings update logic here
+    console.log('Alerts enabled:', !alertsEnabled) // Pcb3a
+  }
 
   if (isLoading) {
     return <div className="flex h-screen items-center justify-center">Loading...</div>
@@ -173,7 +186,7 @@ const Dashboard = () => {
                     <Settings className="mr-2 h-4 w-4" />
                     <span>Settings</span>
                   </DropdownMenuItem>
-                  <DropdownMenuItem className="text-red-500">
+                  <DropdownMenuItem className="text-red-500" onClick={handleLogout}>
                     <LogOut className="mr-2 h-4 w-4" />
                     <span>Log out</span>
                   </DropdownMenuItem>
@@ -321,6 +334,27 @@ const Dashboard = () => {
               </span>
             </AlertDescription>
           </Alert>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Alert Settings</CardTitle>
+              <CardDescription>Manage your activity alerts</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center space-x-4">
+                <label htmlFor="alerts-toggle" className="text-sm font-medium">
+                  Enable Alerts
+                </label>
+                <input
+                  id="alerts-toggle"
+                  type="checkbox"
+                  checked={alertsEnabled}
+                  onChange={handleAlertToggle}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </main>
     </div>
