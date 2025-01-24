@@ -89,6 +89,16 @@ export const urlService = {
     return handleResponse(response);
   },
 
+  async fetchYouTubeActivity(): Promise<Activity[]> {
+    const response = await fetch(`${API_BASE_URL}/youtube-activity`, {
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+
+    return handleResponse(response);
+  },
+
   async retryWithBackoff<T>(
     operation: () => Promise<T>,
     retries = 3,
