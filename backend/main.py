@@ -385,7 +385,8 @@ async def record_activity(activity: ActivityCreate) -> ActivityResponse:
             url=activity.url,
             timestamp=activity.timestamp or datetime.utcnow(),
             action=activity.action,
-            category=activity.category or get_domain_category(activity.url)
+            category=activity.category or get_domain_category(activity.url),
+            risk_level=activity.risk_level
         )
         db.add(db_activity)
         db.commit()

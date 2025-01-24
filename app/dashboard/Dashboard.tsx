@@ -70,7 +70,6 @@ const Dashboard = () => {
     }));
   };
 
-useEffect(() => {
   const fetchAndUpdateStats = async () => {
     setIsLoading(true);
     try {
@@ -85,12 +84,13 @@ useEffect(() => {
     }
   };
 
-  // Initial fetch
-  fetchAndUpdateStats();
+  useEffect(() => {
+    // Initial fetch
+    fetchAndUpdateStats();
 
-  // Cleanup
-  return () => {};
-}, []);
+    // Cleanup
+    return () => {};
+  }, []);
 
   if (isLoading) {
     return (
@@ -252,6 +252,43 @@ useEffect(() => {
             </CardContent>
           </Card>
         </div>
+
+        {/* ML Model Updates Card */}
+        <Card>
+          <CardHeader>
+            <CardTitle>ML Model Updates</CardTitle>
+            <CardDescription>Updates related to the ML model used in the Chrome extension</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={fetchAndUpdateStats} className="mt-4">
+              Refresh ML Model Updates
+            </Button>
+            {stats.ml_model_updates?.length > 0 ? (
+              <div className="space-y-4 mt-4">
+                {stats.ml_model_updates.map((update) => (
+                  <div key={update.id} className="flex items-center justify-between">
+                    <span>{update.message}</span>
+                    <Badge
+                      variant={
+                        update.priority === 'high'
+                          ? 'destructive'
+                          : update.priority === 'medium'
+                          ? 'secondary'
+                          : 'default'
+                      }
+                    >
+                      {update.priority}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center text-muted-foreground py-8">
+                No ML model updates to display.
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
