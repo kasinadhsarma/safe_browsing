@@ -3,7 +3,7 @@ const API_BASE_URL = "http://localhost:8000/api";
 export interface Activity {
   url: string
   timestamp: string
-  action: 'blocked' | 'allowed' | 'visited' | 'checking' | 'error'
+  action: 'blocked' | 'allowed' 'visited' | 'checking' | 'error'
   category?: string
   risk_level?: string
 }
@@ -39,6 +39,11 @@ export const urlService = {
     risk_level: string
     category: string
     url: string
+    text_classification: {
+      nb_prediction: number
+      svm_prediction: number
+      knn_prediction: number
+    }
   }> {
     const formData = new FormData();
     formData.append('url', url);
