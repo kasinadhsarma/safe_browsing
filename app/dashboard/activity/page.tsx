@@ -32,7 +32,7 @@ const fetchActivities = async () => {
       ...activity,
       timestamp: activity.timestamp || new Date().toISOString(),
       url: activity.url || 'N/A'
-    })));
+    })).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
   } catch (error) {
     console.error('Error fetching activities:', error);
     setError('Failed to fetch activities. Please try again.');

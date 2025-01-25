@@ -15,6 +15,7 @@ from datetime import datetime
 import json
 import matplotlib.pyplot as plt
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .dataset import generate_dataset, extract_url_features
 
@@ -78,363 +79,158 @@ def evaluate_model(y_true, y_pred, model_name):
         'false_positive_rate': false_positive_rate
     }
 
-def train_models():
-    """Train and evaluate multiple models for URL classification"""
-    try:
-        # Generate and prepare dataset
-        logging.info("Generating dataset...")
-        df = generate_dataset()
-        if df.empty:
-            raise ValueError("Empty dataset generated")
-
-        # Ensure all required columns exist in the DataFrame
-        feature_cols = [
-            # Basic features
-            'length', 'num_dots', 'num_digits', 'num_special', 'entropy',
-            'token_count', 'avg_token_length', 'max_token_length', 'min_token_length',
-            # Domain features
-            'domain_length', 'has_subdomain', 'has_www', 'domain_entropy',
-            'is_ip_address', 'domain_digit_ratio', 'domain_special_ratio',
-            'domain_uppercase_ratio',
-            # Path features
-            'path_length', 'num_directories', 'path_entropy', 'has_double_slash',
-            'directory_length_mean', 'directory_length_max', 'directory_length_min',
-            'path_special_ratio',
-            # Query features
-            'num_params', 'query_length', 'has_suspicious_params',
-            'param_entropy', 'param_special_ratio',
-            # Security features
-            'has_https', 'has_port', 'suspicious_tld', 'has_fragment',
-            'has_redirect', 'has_obfuscation',
-            # Content indicators
-            'has_suspicious_words', 'suspicious_word_count', 'suspicious_word_ratio',
-            'has_executable', 'has_archive',
-            # Age-specific features
-            'kid_unsafe_words', 'teen_unsafe_words', 'kid_unsafe_ratio',
-            'teen_unsafe_ratio', 'kid_unsafe_score', 'teen_unsafe_score'
-        ]
-
-        # Initialize missing columns with 0
-        for col in feature_cols:
-            if col not in df.columns:
-                df[col] = 0
-
-        X = df[feature_cols].values
-        y = df['is_blocked'].values
-
-        # Balance dataset
-        X_balanced, y_balanced = balance_dataset(X, y)
-
-        # Split dataset
-        X_train, X_test, y_train, y_test = train_test_split(X_balanced, y_balanced, test_size=0.2, random_state=42)
-
-        # Scale features
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
-
-        # Create models directory with versioning
-        base_path = os.path.dirname(os.path.abspath(__file__))
-        models_dir = os.path.join(base_path, 'models')
-        os.makedirs(models_dir, exist_ok=True)
-
-        # Create versioned directory
-        version = datetime.now().strftime('%Y%m%d_%H%M%S')
-        version_dir = os.path.join(models_dir, version)
-        os.makedirs(version_dir, exist_ok=True)
-
-        # Save metadata
-        metadata = {
-            'version': version,
-            'timestamp': datetime.now().isoformat(),
-            'feature_columns': feature_cols,
-            'dataset_size': len(df),
-            'positive_samples': sum(y),
-            'negative_samples': len(y) - sum(y)
-        }
-
-        # Save scaler and feature columns
-        joblib.dump(scaler, os.path.join(version_dir, 'url_scaler.pkl'))
-        joblib.dump(feature_cols, os.path.join(version_dir, 'feature_cols.pkl'))
-        joblib.dump(metadata, os.path.join(version_dir, 'metadata.pkl'))
-
-        # Create symlink to latest version
-        latest_link = os.path.join(models_dir, 'latest')
-        if os.path.exists(latest_link):
-            os.remove(latest_link)
-        os.symlink(version_dir, latest_link)
-
-        models = {}
-
-        # 1. K-Nearest Neighbors with hyperparameter tuning
-        logging.info("\nTraining KNN Model with Grid Search...")
-        knn_params = {
-            'n_neighbors': [3, 5, 7, 9],
-            'weights': ['uniform', 'distance'],
-            'metric': ['minkowski', 'cosine'],
-            'p': [1, 2]
-        }
-
-        # Use F1 score for optimization
-        f1_scorer = make_scorer(f1_score)
-        knn = GridSearchCV(
-            KNeighborsClassifier(),
-            knn_params,
-            scoring=f1_scorer,
-            cv=StratifiedKFold(n_splits=5),
-            n_jobs=-1,
-            verbose=1
-        )
-        knn.fit(X_train_scaled, y_train)
-
-        logging.info(f"Best KNN parameters: {knn.best_params_}")
-        knn_pred = knn.predict(X_test_scaled)
-        models['knn'] = {
-            'model': knn.best_estimator_,
-            'metrics': evaluate_model(y_test, knn_pred, "KNN"),
-            'best_params': knn.best_params_
-        }
-        joblib.dump(knn.best_estimator_, os.path.join(version_dir, 'knn_model.pkl'))
-
-        # 2. Support Vector Machine with hyperparameter tuning
-        logging.info("\nTraining SVM Model with Grid Search...")
-        svm_params = {
-            'C': [0.1, 1, 10, 50, 100],
-            'gamma': ['scale', 'auto', 0.1, 1],
-            'kernel': ['rbf', 'linear'],
-            'class_weight': [{0: 1.0, 1: 2.0}, 'balanced']
-        }
-
-        svm = GridSearchCV(
-            SVC(probability=True),
-            svm_params,
-            scoring=f1_scorer,
-            cv=StratifiedKFold(n_splits=5),
-            n_jobs=-1,
-            verbose=1
-        )
-        svm.fit(X_train_scaled, y_train)
-
-        logging.info(f"Best SVM parameters: {svm.best_params_}")
-        svm_pred = svm.predict(X_test_scaled)
-        models['svm'] = {
-            'model': svm.best_estimator_,
-            'metrics': evaluate_model(y_test, svm_pred, "SVM"),
-            'best_params': svm.best_params_
-        }
-        joblib.dump(svm.best_estimator_, os.path.join(version_dir, 'svm_model.pkl'))
-
-        # 3. Naive Bayes with hyperparameter tuning
-        logging.info("\nTraining Naive Bayes Model with Grid Search...")
-        nb_params = {
-            'var_smoothing': [1e-9, 1e-7, 1e-5],
-            'priors': [None, [0.6, 0.4], [0.5, 0.5]]
-        }
-
-        nb = GridSearchCV(
-            GaussianNB(),
-            nb_params,
-            scoring=f1_scorer,
-            cv=StratifiedKFold(n_splits=5),
-            n_jobs=-1,
-            verbose=1
-        )
-
-        # Pre-process data for Naive Bayes
-        epsilon = 1e-10
-        X_train_scaled_nb = X_train_scaled + epsilon
-        nb.fit(X_train_scaled_nb, y_train)
-
-        logging.info(f"Best Naive Bayes parameters: {nb.best_params_}")
-        nb_pred = nb.predict(X_test_scaled)
-        models['nb'] = {
-            'model': nb.best_estimator_,
-            'metrics': evaluate_model(y_test, nb_pred, "Naive Bayes"),
-            'best_params': nb.best_params_
-        }
-        joblib.dump(nb.best_estimator_, os.path.join(version_dir, 'nb_model.pkl'))
-
-        # Generate evaluation report
-        generate_evaluation_report(models, version_dir)
-
-        return models
-
-    except Exception as e:
-        logging.error(f"Error during model training: {e}")
-        return None
-
-def generate_evaluation_report(models, output_dir):
-    """Generate comprehensive evaluation report for all models"""
-    report = {
-        'models': {},
-        'summary': {
-            'best_model': None,
-            'best_f1': 0,
-            'total_samples': 0,
-            'positive_samples': 0,
-            'negative_samples': 0,
-            'improvement': None
-        }
-    }
-
-    # Compare with previous version if exists
-    models_dir = Path(output_dir).parent
-    previous_versions = sorted([d for d in models_dir.iterdir() if d.is_dir() and d.name != 'latest'])
-
-    if len(previous_versions) > 1:
-        # Get second-to-last version
-        prev_version = previous_versions[-2]
-        prev_report_path = prev_version / 'evaluation_report.json'
-
-        if prev_report_path.exists():
-            with open(prev_report_path) as f:
-                prev_report = json.load(f)
-
-            # Calculate improvement metrics
-            current_best_f1 = max(m['metrics']['f1'] for m in models.values())
-            prev_best_f1 = prev_report['summary']['best_f1']
-
-            report['summary']['improvement'] = {
-                'previous_best_f1': prev_best_f1,
-                'current_best_f1': current_best_f1,
-                'f1_delta': current_best_f1 - prev_best_f1,
-                'percent_improvement': ((current_best_f1 - prev_best_f1) / prev_best_f1) * 100
-            }
-
-    # Create plots directory
-    plots_dir = os.path.join(output_dir, 'plots')
-    os.makedirs(plots_dir, exist_ok=True)
-
-    # Generate metrics and plots for each model
-    for model_name, model_data in models.items():
-        metrics = model_data['metrics']
-        report['models'][model_name] = {
-            'metrics': metrics,
-            'best_params': model_data['best_params']
-        }
-
-        # Update summary
-        if metrics['f1'] > report['summary']['best_f1']:
-            report['summary']['best_model'] = model_name
-            report['summary']['best_f1'] = metrics['f1']
-
-        # Generate metrics plot
-        plt.figure(figsize=(10, 6))
-        plt.bar(['Accuracy', 'Precision', 'Recall', 'F1'],
-                [metrics['accuracy'], metrics['precision'],
-                 metrics['recall'], metrics['f1']])
-        plt.title(f'{model_name} Performance Metrics')
-        plt.ylim(0, 1)
-        plt.savefig(os.path.join(plots_dir, f'{model_name}_metrics.png'))
-        plt.close()
-
-    # Save report
-    report_path = os.path.join(output_dir, 'evaluation_report.json')
-    with open(report_path, 'w') as f:
-        json.dump(report, f, indent=2)
-
-    logging.info(f"\nEvaluation report saved to: {report_path}")
-
-    # Generate comparison plot if improvement data exists
-    if report['summary']['improvement']:
-        plt.figure(figsize=(10, 6))
-        plt.bar(['Previous', 'Current'],
-                [report['summary']['improvement']['previous_best_f1'],
-                 report['summary']['improvement']['current_best_f1']])
-        plt.title('Model Performance Improvement')
-        plt.ylabel('F1 Score')
-        plt.ylim(0, 1)
-        plt.savefig(os.path.join(plots_dir, 'performance_comparison.png'))
-        plt.close()
-
-def calculate_age_based_risk(predictions, features, age_group='kid'):
+def calculate_age_based_risk(predictions, features, age_group):
     """
-    Calculate risk level based on age group and features
+    Calculate risk level and score based on age group and URL features
+    
     Args:
-        predictions: Dict of model predictions
-        features: URL features
-        age_group: 'kid' or 'teen'
+        predictions: Dictionary containing model predictions
+        features: Dictionary of URL features
+        age_group: Age group category ('kid', 'teen', 'adult')
+    
     Returns:
         tuple: (risk_level, risk_score)
     """
-    # Base risk from model predictions
-    ensemble_score = (
-        0.4 * predictions['svm']['probability'] +
-        0.35 * predictions['knn']['probability'] +
-        0.25 * predictions['nb']['probability']
-    )
-
-    # Age-specific risk factors
-    age_multipliers = {
-        'kid': {
-            'kid_unsafe_words': 2.0,
-            'suspicious_tld': 1.5,
-            'has_suspicious_words': 1.5,
-            'has_executable': 2.0
-        },
-        'teen': {
-            'teen_unsafe_words': 1.5,
-            'suspicious_tld': 1.2,
-            'has_suspicious_words': 1.2,
-            'has_executable': 1.5
-        }
+    # Base weights for different models based on their reliability
+    model_weights = {
+        'knn': 0.3,
+        'svm': 0.4,
+        'nb': 0.3
     }
 
-    multiplier = age_multipliers[age_group]
-    risk_score = ensemble_score
+    # Age-specific risk modifiers
+    age_modifiers = {
+        'kid': 1.3,    # Increase risk score for kids
+        'teen': 1.1,   # Slightly increase risk for teens
+        'adult': 1.0   # No modification for adults
+    }
 
-    # Apply age-specific risk multipliers
-    for feature, weight in multiplier.items():
-        if feature in features and features[feature] > 0:
-            risk_score *= weight
+    # Calculate weighted average probability
+    weighted_prob = sum(
+        predictions[model]['probability'] * model_weights[model]
+        for model in predictions.keys()
+    )
 
-    # Cap risk score at 1.0
-    risk_score = min(risk_score, 1.0)
+    # Apply age-specific modifier
+    risk_score = weighted_prob * age_modifiers.get(age_group, 1.0)
 
-    # Determine risk level
+    # Determine risk level based on score
     if risk_score > 0.8:
-        risk_level = "High"
+        risk_level = 'high'
     elif risk_score > 0.5:
-        risk_level = "Medium"
+        risk_level = 'medium'
     else:
-        risk_level = "Low"
+        risk_level = 'low'
 
-    return risk_level, risk_score
+    return risk_level, min(risk_score, 1.0)  # Cap risk score at 1.0
 
-def ensemble_predict(url_features, threshold=0.65, models_dir='models/latest', age_group='kid'):
+def train_models():
+    """Train the ensemble of models for URL classification"""
+    try:
+        # Generate and preprocess dataset
+        logging.info("Generating dataset...")
+        dataset = generate_dataset()
+        
+        # Extract features and labels
+        feature_columns = [col for col in dataset.columns if col not in ['url', 'is_blocked', 'category']]
+        X = dataset[feature_columns].values
+        y = dataset['is_blocked'].values
+        
+        # Split dataset
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+        
+        # Balance training data
+        X_train_balanced, y_train_balanced = balance_dataset(X_train, y_train)
+        
+        # Scale features
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train_balanced)
+        X_test_scaled = scaler.transform(X_test)
+        
+        # Initialize models with hyperparameters
+        models = {
+            'knn': KNeighborsClassifier(n_neighbors=5, weights='distance'),
+            'svm': SVC(kernel='rbf', probability=True, C=1.0),
+            'nb': GaussianNB()
+        }
+        
+        # Train and evaluate each model
+        trained_models = {}
+        for name, model in models.items():
+            logging.info(f"\nTraining {name.upper()} model...")
+            model.fit(X_train_scaled, y_train_balanced)
+            
+            # Evaluate
+            y_pred = model.predict(X_test_scaled)
+            metrics = evaluate_model(y_test, y_pred, name.upper())
+            trained_models[name] = model
+            
+        # Save models and preprocessing objects
+        save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'latest')
+        os.makedirs(save_dir, exist_ok=True)
+        
+        for name, model in trained_models.items():
+            joblib.dump(model, os.path.join(save_dir, f'{name}_model.pkl'))
+        
+        # Save scaler and feature columns
+        joblib.dump(scaler, os.path.join(save_dir, 'url_scaler.pkl'))
+        joblib.dump(feature_columns, os.path.join(save_dir, 'feature_cols.pkl'))
+        
+        logging.info("\nModel training completed successfully!")
+        
+    except Exception as e:
+        logging.error(f"Error during model training: {e}")
+        raise
+
+def predict_url(url, threshold=0.65, models_dir=None, age_group='kid'):
     """
-    Make predictions using ensemble of models with adjustable threshold
+    Make prediction for a single URL using ensemble of models
+    Args:
+        url: URL to analyze
+        threshold: Classification threshold (default: 0.65)
+        models_dir: Directory containing trained models
+        age_group: Age group for risk assessment
     Returns:
-        tuple: (is_unsafe, probability, predictions)
-        - is_unsafe: bool indicating if URL is classified as unsafe
-        - probability: float indicating probability of URL being unsafe
-        - predictions: dict containing individual model predictions and probabilities
+        tuple: (is_unsafe, probability, risk_score)
     """
     try:
         # Load models and scaler
-        base_path = os.path.dirname(os.path.abspath(__file__))
-        models_dir = os.path.join(base_path, models_dir)
+        if models_dir is None:
+            models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'latest')
 
-        knn = joblib.load(os.path.join(models_dir, 'knn_model.pkl'))
-        svm = joblib.load(os.path.join(models_dir, 'svm_model.pkl'))
-        nb = joblib.load(os.path.join(models_dir, 'nb_model.pkl'))
-        scaler = joblib.load(os.path.join(models_dir, 'url_scaler.pkl'))
-        feature_cols = joblib.load(os.path.join(models_dir, 'feature_cols.pkl'))
+        try:
+            knn = joblib.load(os.path.join(models_dir, 'knn_model.pkl'))
+            svm = joblib.load(os.path.join(models_dir, 'svm_model.pkl'))
+            nb = joblib.load(os.path.join(models_dir, 'nb_model.pkl'))
+            scaler = joblib.load(os.path.join(models_dir, 'url_scaler.pkl'))
+            feature_cols = joblib.load(os.path.join(models_dir, 'feature_cols.pkl'))
+        except FileNotFoundError as e:
+            logging.error(f"Could not load models from {models_dir}. Error: {e}")
+            # Initialize empty predictions dictionary to avoid division by zero
+            predictions = {}
+            return False, 0.0, 0.0
 
-        # Convert url_features to list if it's a string
-        if isinstance(url_features, str):
-            url_features = list(extract_url_features(url_features).values())
+        # Extract features
+        features = extract_url_features(url)
+        if not features:
+            raise ValueError("Failed to extract features from URL")
+
+        # Ensure features are a list of values
+        if isinstance(features, dict):
+            features = list(features.values())
 
         # Ensure features array matches expected features
-        if len(url_features) != len(feature_cols):
-            logging.error(f"Mismatch in feature length: Expected {len(feature_cols)} features, got {len(url_features)}")
+        if len(features) != len(feature_cols):
+            logging.error(f"Mismatch in feature length: Expected {len(feature_cols)} features, got {len(features)}")
             logging.error(f"Feature columns: {feature_cols}")
-            logging.error(f"Extracted features: {url_features}")
-            raise ValueError(f"Expected {len(feature_cols)} features, got {len(url_features)}")
+            logging.error(f"Extracted features: {features}")
+            raise ValueError(f"Expected {len(feature_cols)} features, got {len(features)}")
 
         # Scale features
-        features_scaled = scaler.transform([url_features])
-        logging.info(f"Scaled features: {features_scaled}")
+        features_array = np.array(features).reshape(1, -1)
+        features_scaled = scaler.transform(features_array)
 
         # Get predictions and probabilities
         predictions = {}
@@ -460,36 +256,62 @@ def ensemble_predict(url_features, threshold=0.65, models_dir='models/latest', a
             'probability': nb_prob
         }
 
-        # Dynamic threshold based on age group
+        # Calculate base risk from model predictions
+        base_features = extract_url_features(url) if isinstance(url, str) else dict(zip(feature_cols, features))
+        
+        # Trust factors (reduce risk score)
+        trust_score = 1.0
+        if base_features.get('has_https', 0) == 1:
+            trust_score *= 0.7  # Significant trust for HTTPS
+        
+        # Check for trusted domains
+        domain = urlparse(url).netloc.lower()
+        trusted_domains = {'github.com', 'python.org', 'wikipedia.org'}
+        if any(td in domain for td in trusted_domains):
+            trust_score *= 0.5  # High trust for known good domains
+            
+        # Risk factors (increase risk score)
+        risk_multiplier = 1.0
+        if base_features.get('is_ip_address', 0) == 1:
+            risk_multiplier *= 2.0  # Major increase for IP-based URLs
+        if base_features.get('suspicious_word_count', 0) > 2:
+            risk_multiplier *= 1.5  # Increase for multiple suspicious words
+        if base_features.get('suspicious_tld', 0) == 1:
+            risk_multiplier *= 1.8  # Increase for suspicious TLDs
+            
+        # Calculate age-specific thresholds
         age_thresholds = {
-            'kid': 0.6,  # More strict for kids
-            'teen': 0.7,  # Moderate for teens
-            'adult': 0.8  # More lenient for adults
+            'kid': 0.5,    # More strict for kids
+            'teen': 0.6,   # Moderate for teens
+            'adult': 0.7   # More lenient for adults
         }
         effective_threshold = age_thresholds.get(age_group, threshold)
-
-        # Enhanced ensemble voting with feature-based boosting
-        base_features = extract_url_features(url_features) if isinstance(url_features, str) else dict(zip(feature_cols, url_features))
-
-        # Calculate risk with boosted weighting
+        
+        # Get base risk score from models
         risk_level, risk_score = calculate_age_based_risk(
             predictions,
             base_features,
             age_group
         )
+        
+        # Apply trust and risk modifiers
+        final_risk_score = (risk_score * risk_multiplier * trust_score)
+        
+        # Ensure score stays in [0,1] range
+        final_risk_score = max(0.0, min(1.0, final_risk_score))
 
-        # Apply additional safety checks
-        if base_features.get('is_ip_address', 0) == 1:
-            risk_score *= 1.2  # Increase risk for IP-based URLs
-        if base_features.get('has_https', 0) == 0:
-            risk_score *= 1.1  # Increase risk for non-HTTPS
-        if base_features.get('suspicious_word_count', 0) > 2:
-            risk_score *= 1.3  # Significant increase for multiple suspicious words
+        # Update risk level based on final score
+        if final_risk_score > 0.8:
+            risk_level = 'high'
+        elif final_risk_score > 0.5:
+            risk_level = 'medium'
+        else:
+            risk_level = 'low'
 
         # Enhanced result with age-specific risk assessment
         result = {
-            'is_unsafe': bool(risk_score > threshold),
-            'risk_score': risk_score,
+            'is_unsafe': bool(final_risk_score > effective_threshold),
+            'risk_score': final_risk_score,
             'risk_level': risk_level,
             'age_group': age_group,
             'model_predictions': predictions
@@ -497,13 +319,13 @@ def ensemble_predict(url_features, threshold=0.65, models_dir='models/latest', a
 
         # Visualize the predictions
         plt.figure(figsize=(8, 6))
-        plt.bar(['Risk Score'], [risk_score])
+        plt.bar(['Risk Score'], [final_risk_score])
         plt.title('Risk Score for URL')
         plt.ylim(0, 1)
         plt.ylabel('Risk Score')
         plt.show()
 
-        return result['is_unsafe'], result['risk_score'], result
+        return result['is_unsafe'], result['risk_score'], result['risk_score']
 
     except Exception as e:
         logging.error(f"Error during ensemble prediction: {e}")

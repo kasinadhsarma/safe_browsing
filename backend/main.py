@@ -19,7 +19,7 @@ import torch
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from ml.ai.training import train_models, ensemble_predict
+from ml.ai.training import train_models, predict_url
 from ml.ai.dataset import extract_url_features, generate_dataset
 from ml.ai.image_classification import ImageClassifier
 import os
@@ -224,8 +224,8 @@ async def check_url(url: str = Form(...), age_group: str = Form("kid")):
         else:
             # Make prediction with age-based risk assessment
             if url_model:
-                is_blocked, risk_score, predictions = ensemble_predict(
-                    list(features.values()),
+                is_blocked, risk_score, predictions = predict_url(
+                    url,
                     threshold=0.7 if age_group == "kid" else 0.8,
                     models_dir='ml/ai/models/',
                     age_group=age_group
@@ -386,4 +386,30 @@ async def get_alerts():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import socket
+
+    def is_port_in_use(port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('0.0.0.0', port))
+                return False
+            except socket.error:
+                return True
+
+    try:
+        logging.info("Initializing server...")
+        
+        # Try ports from 8000 to 8010
+        port = 8000
+        while port < 8010:
+            if not is_port_in_use(port):
+                logging.info(f"Starting server on port {port}")
+                uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+                break
+            logging.info(f"Port {port} is in use, trying next port")
+            port += 1
+        else:
+            logging.error("No available ports found between 8000")
+    except Exception as e:
+        logging.error(f"Server startup error: {str(e)}")
+        raise
