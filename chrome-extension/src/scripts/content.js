@@ -1,6 +1,3 @@
-// Enhanced SafeBrowsing content script
-
-// Configuration
 const API_ENDPOINT = 'http://localhost:8000/api';
 const CHECK_URL_ENDPOINT = `${API_ENDPOINT}/check-url`;
 const LOG_ACTIVITY_ENDPOINT = `${API_ENDPOINT}/activity`;
@@ -84,6 +81,8 @@ class SafeBrowsingChecker {
                 category: result.category || 'Unknown',
                 risk_level: result.risk_level || 'Unknown',
                 timestamp: new Date().toISOString(),
+                age_group: result.age_group || 'kid',
+                block_reason: result.block_reason || ''
             };
 
             // Create a new FormData instance
@@ -93,6 +92,8 @@ class SafeBrowsingChecker {
             formData.append('category', activity.category || 'Unknown');
             formData.append('risk_level', activity.risk_level || 'Unknown');
             formData.append('ml_scores', JSON.stringify(result.predictions || {}));
+            formData.append('age_group', activity.age_group);
+            formData.append('block_reason', activity.block_reason);
 
             await fetch(LOG_ACTIVITY_ENDPOINT, {
                 method: 'POST',

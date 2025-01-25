@@ -65,7 +65,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
 }
 
 export const urlService = {
-  async checkUrl(url: string): Promise<{
+  async checkUrl(url: string, age_group: string = 'kid'): Promise<{
     blocked: boolean;
     probability: number;
     risk_level: string;
@@ -74,6 +74,7 @@ export const urlService = {
   }> {
     const formData = new FormData();
     formData.append('url', url);
+    formData.append('age_group', age_group);
 
     const response = await fetch(`${API_BASE_URL}/check-url`, {
       method: 'POST',
