@@ -86,6 +86,8 @@ const AlertsPage = () => {
                   <TableHead>Action</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Risk Level</TableHead>
+                  <TableHead>Age Group</TableHead>
+                  <TableHead>Block Reason</TableHead>
                   <TableHead>Time</TableHead>
                 </TableRow>
               </TableHeader>
@@ -107,6 +109,14 @@ const AlertsPage = () => {
                       >
                         {alert.risk_level || 'N/A'}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">
+                        {alert.age_group || 'N/A'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="max-w-xs truncate">
+                      {alert.block_reason || '-'}
                     </TableCell>
                     <TableCell>
                       {new Date(alert.timestamp).toLocaleString('en-US', {

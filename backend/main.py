@@ -362,6 +362,7 @@ async def log_activity(request: Request):
     category = form_data.get("category", "Unknown")
     risk_level = form_data.get("risk_level", "Unknown")
     ml_scores = form_data.get("ml_scores", "{}")
+    block_reason = form_data.get("block_reason", None)
     """Log browsing activity"""
     db = SessionLocal()
     try:
@@ -380,7 +381,8 @@ async def log_activity(request: Request):
             category=category.strip() or "Unknown",
             risk_level=risk_level.strip() or "Unknown",
             ml_scores=valid_scores,
-            age_group=form_data.get("age_group", "kid").strip()
+            age_group=form_data.get("age_group", "kid").strip(),
+            block_reason=block_reason.strip() if block_reason else None
         )
         db.add(activity)
         db.commit()

@@ -1,5 +1,3 @@
-// Popup script for Safe Browsing extension
-
 class PopupManager {
     constructor() {
         this.statusValue = document.getElementById('status-value');
@@ -127,21 +125,9 @@ class PopupManager {
             // Update status
             this.updateStatus(
                 result.blocked ? 'Unsafe - Blocked' : 'Safe',
-                !result.blocked
+                !result.blocked,
+                result
             );
-
-            // Always show details with default values
-            const details = document.createElement('div');
-            details.style.fontSize = '12px';
-            details.style.marginTop = '4px';
-            details.innerHTML = `
-                Category: ${result.category || 'Unknown'}<br>
-                Risk Level: ${result.risk_level || 'Unknown'}<br>
-                ${result.probability ? `Confidence: ${(result.probability * 100).toFixed(1)}%` : ''}<br>
-                Age Group: ${result.age_group || 'Kid'}<br>
-                ${result.block_reason ? `Block Reason: ${result.block_reason}` : ''}
-            `;
-            this.statusValue.appendChild(details);
 
         } catch (error) {
             console.error('Error checking current page:', error);
@@ -149,9 +135,22 @@ class PopupManager {
         }
     }
 
-    updateStatus(message, isSafe = true) {
+    updateStatus(message, isSafe = true, result = {}) {
         this.statusValue.textContent = message;
         this.statusValue.className = `status-value ${isSafe ? '' : 'unsafe'}`;
+
+        // Always show details with default values
+        const details = document.createElement('div');
+        details.style.fontSize = '12px';
+        details.style.marginTop = '4px';
+        details.innerHTML = `
+            Category: ${result.category || 'Unknown'}<br>
+            Risk Level: ${result.risk_level || 'Unknown'}<br>
+            ${result.probability ? `Confidence: ${(result.probability * 100).toFixed(1)}%` : ''}<br>
+            Age Group: ${result.age_group || 'Kid'}<br>
+            ${result.block_reason ? `Block Reason: ${result.block_reason}` : ''}
+        `;
+        this.statusValue.appendChild(details);
     }
 }
 

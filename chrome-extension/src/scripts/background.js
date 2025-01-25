@@ -1,6 +1,3 @@
-// Background script for Safe Browsing extension
-
-// Configuration
 const API_ENDPOINT = 'http://localhost:8000/api';
 const CHECK_URL_ENDPOINT = `${API_ENDPOINT}/check-url`;
 const LOG_ACTIVITY_ENDPOINT = `${API_ENDPOINT}/activity`;
@@ -59,9 +56,19 @@ async function checkUrl(url) {
             return urlCache.get(url);
         }
 
+        // Get user settings
+        const settings = await new Promise(resolve => {
+            chrome.storage.sync.get(['ageGroup'], (result) => {
+                resolve({
+                    ageGroup: result.ageGroup || 'kid' // Default to most restrictive
+                });
+            });
+        });
+
         // Prepare form data
         const formData = new FormData();
         formData.append('url', url);
+        formData.append('age_group', settings.ageGroup);
 
         // Make API request
         const response = await fetch(CHECK_URL_ENDPOINT, {
@@ -101,7 +108,9 @@ async function logActivity(url, result) {
             action: result.blocked ? 'blocked' : 'allowed',
             category: result.category || 'Unknown',
             risk_level: result.risk_level || 'Unknown',
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            age_group: result.age_group || 'kid',
+            block_reason: result.block_reason || ''
         };
 
         const formData = new FormData();
@@ -110,6 +119,8 @@ async function logActivity(url, result) {
         formData.append('category', activity.category);
         formData.append('risk_level', activity.risk_level);
         formData.append('ml_scores', JSON.stringify(result.predictions || {}));
+        formData.append('age_group', activity.age_group);
+        formData.append('block_reason', activity.block_reason);
 
         await fetch(LOG_ACTIVITY_ENDPOINT, {
             method: 'POST',
