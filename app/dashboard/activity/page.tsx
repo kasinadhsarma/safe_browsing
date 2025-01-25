@@ -10,12 +10,15 @@ import { urlService, Activity as ActivityType } from '@/app/api/urlService';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { RefreshCw, Search } from 'lucide-react';
+import axios from 'axios';
 
 const ActivityPage = () => {
   const [activities, setActivities] = useState<ActivityType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [alertsEnabled, setAlertsEnabled] = useState(false);
+  const [youtubeActivityEnabled, setYoutubeActivityEnabled] = useState(false);
 
 const fetchActivities = async () => {
   setIsLoading(true);
@@ -25,7 +28,11 @@ const fetchActivities = async () => {
     const data = await urlService.getRecentActivities();
     console.log('Activities fetched:', data);
     console.log('Activities length:', data.length);
-    setActivities(data);
+    setActivities(data.map(activity => ({
+      ...activity,
+      timestamp: activity.timestamp || new Date().toISOString(),
+      url: activity.url || 'N/A'
+    })));
   } catch (error) {
     console.error('Error fetching activities:', error);
     setError('Failed to fetch activities. Please try again.');
@@ -34,9 +41,20 @@ const fetchActivities = async () => {
   }
 };
 
-useEffect(() => {
-  fetchActivities();
-}, []);
+  const fetchSettings = async () => {
+    try {
+      const response = await axios.get('/api/settings');
+      setAlertsEnabled(response.data.alertsEnabled);
+      setYoutubeActivityEnabled(response.data.youtubeActivityEnabled);
+    } catch (err) {
+      console.error('Error fetching settings:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchActivities();
+    fetchSettings();
+  }, []);
 
   const filteredActivities = activities.filter(activity =>
     activity.url?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -112,9 +130,9 @@ useEffect(() => {
                   filteredActivities.map((activity, index) => (
                     <TableRow key={`${activity.url}-${index}`}>
                       <TableCell className="font-medium max-w-md truncate">
-                        <a 
-                          href={activity.url} 
-                          target="_blank" 
+                        <a
+                          href={activity.url}
+                          target="_blank"
                           rel="noopener noreferrer"
                           className="hover:underline"
                         >

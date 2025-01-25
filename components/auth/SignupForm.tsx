@@ -6,26 +6,37 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
 import Link from 'next/link'
+import axios from 'axios';
 
 interface SignupFormProps {
   onSuccess: () => void // Callback for successful signup
+  onError: (error: string) => void // Callback for signup errors
 }
 
-export function SignupForm({ onSuccess }: SignupFormProps) {
+export function SignupForm({ onSuccess, onError }: SignupFormProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Handle signup logic here
+    setError(null);
     if (password !== confirmPassword) {
-      console.error('Passwords do not match')
-      return
+      setError('Passwords do not match');
+      return;
     }
-    console.log('Signup attempted with:', { email, password })
-    // Simulate successful signup
-    onSuccess()
+    try {
+      const response = await axios.post('/api/signup', { email, password });
+      if (response.data.success) {
+        onSuccess();
+      } else {
+        setError(response.data.message || 'Signup failed');
+      }
+    } catch (err) {
+      setError('An error occurred during signup');
+      onError('An error occurred during signup');
+    }
   }
 
   return (
@@ -35,6 +46,9 @@ export function SignupForm({ onSuccess }: SignupFormProps) {
         <CardDescription>Create a new account to get started</CardDescription>
       </CardHeader>
       <CardContent>
+        {error && (
+          <div className="text-red-500 mb-4">{error}</div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>

@@ -6,14 +6,27 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import Link from 'next/link'
+import axios from 'axios';
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState('')
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Handle forgot password logic here
-    console.log('Password reset requested for:', email)
+    setError(null);
+    setSuccess(null);
+    try {
+      const response = await axios.post('/api/forgot-password', { email });
+      if (response.data.success) {
+        setSuccess('Password reset email sent. Please check your inbox.');
+      } else {
+        setError(response.data.message || 'Failed to send password reset email.');
+      }
+    } catch (err) {
+      setError('An error occurred during password reset.');
+    }
   }
 
   return (
@@ -23,6 +36,12 @@ export function ForgotPasswordForm() {
         <CardDescription>Enter your email to reset your password</CardDescription>
       </CardHeader>
       <CardContent>
+        {error && (
+          <div className="text-red-500 mb-4">{error}</div>
+        )}
+        {success && (
+          <div className="text-green-500 mb-4">{success}</div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>

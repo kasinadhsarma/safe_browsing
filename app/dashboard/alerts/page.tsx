@@ -7,11 +7,14 @@ import { Badge } from '@/components/ui/badge';
 import { urlService, Activity as ActivityType } from '@/app/api/urlService';
 import { Spinner } from '@/components/ui/spinner'; // Assuming you have a Spinner component
 import { Alert, AlertDescription } from '@/components/ui/alert'; // Assuming you have an Alert component
+import axios from 'axios';
 
 const AlertsPage = () => {
   const [alerts, setAlerts] = useState<ActivityType[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [alertsEnabled, setAlertsEnabled] = useState(false);
+  const [youtubeActivityEnabled, setYoutubeActivityEnabled] = useState(false);
 
   const fetchAlerts = async () => {
     try {
@@ -27,8 +30,19 @@ const AlertsPage = () => {
     }
   };
 
+  const fetchSettings = async () => {
+    try {
+      const response = await axios.get('/api/settings');
+      setAlertsEnabled(response.data.alertsEnabled);
+      setYoutubeActivityEnabled(response.data.youtubeActivityEnabled);
+    } catch (err) {
+      console.error('Error fetching settings:', err);
+    }
+  };
+
   useEffect(() => {
     fetchAlerts();
+    fetchSettings();
     // Refresh alerts every 30 seconds
     const interval = setInterval(fetchAlerts, 30000);
     return () => clearInterval(interval);
@@ -84,25 +98,25 @@ const AlertsPage = () => {
                     </TableCell>
                     <TableCell>{alert.category || 'N/A'}</TableCell>
                     <TableCell>
-      <Badge 
-        variant={
-          alert.risk_level?.toLowerCase() === 'high' ? 'destructive' :
-          alert.risk_level?.toLowerCase() === 'medium' ? 'secondary' :
-          'default'
-        }
-      >
-        {alert.risk_level || 'N/A'}
-      </Badge>
-    </TableCell>
-      <TableCell>
-        {new Date(alert.timestamp).toLocaleString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        })}
-      </TableCell>
+                      <Badge
+                        variant={
+                          alert.risk_level?.toLowerCase() === 'high' ? 'destructive' :
+                          alert.risk_level?.toLowerCase() === 'medium' ? 'secondary' :
+                          'default'
+                        }
+                      >
+                        {alert.risk_level || 'N/A'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {new Date(alert.timestamp).toLocaleString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

@@ -10,6 +10,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { cn } from "@/lib/utils";
 import { urlService, Activity as ActivityType, DashboardStats } from '@/app/api/urlService';
+import axios from 'axios';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 const actionColors = {
   blocked: 'destructive',
@@ -23,6 +26,7 @@ const Dashboard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
+  const [youtubeActivityEnabled, setYoutubeActivityEnabled] = useState(false);
 
   const RISK_COLORS = {
     high: '#ef4444',
@@ -84,9 +88,20 @@ const Dashboard = () => {
     }
   };
 
+  const fetchSettings = async () => {
+    try {
+      const response = await axios.get('/api/settings');
+      setAlertsEnabled(response.data.alertsEnabled);
+      setYoutubeActivityEnabled(response.data.youtubeActivityEnabled);
+    } catch (err) {
+      console.error('Error fetching settings:', err);
+    }
+  };
+
   useEffect(() => {
     // Initial fetch
     fetchAndUpdateStats();
+    fetchSettings();
 
     // Cleanup
     return () => {};
@@ -153,9 +168,9 @@ const Dashboard = () => {
               <span>Visited Sites</span>
               <Badge variant="secondary">{stats?.visited_sites ?? 0}</Badge>
             </div>
-            <Progress 
-              value={stats ? (stats.blocked_sites / Math.max(stats.total_sites, 1)) * 100 : 0} 
-              className="h-2" 
+            <Progress
+              value={stats ? (stats.blocked_sites / Math.max(stats.total_sites, 1)) * 100 : 0}
+              className="h-2"
             />
           </CardContent>
         </Card>
@@ -184,7 +199,7 @@ const Dashboard = () => {
 
         {/* Risk Distribution and Alerts Row */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Risk Distribution Card */}  
+          {/* Risk Distribution Card */}
           <Card>
             <CardHeader>
               <CardTitle>Risk Distribution</CardTitle>
@@ -198,7 +213,7 @@ const Dashboard = () => {
                     cx="50%"
                     cy="50%"
                     labelLine={true}
-                    label={({ name, value, percent }) => 
+                    label={({ name, value, percent }) =>
                       `${name} (${value}): ${(percent * 100).toFixed(0)}%`
                     }
                     outerRadius={100}
@@ -206,9 +221,9 @@ const Dashboard = () => {
                     dataKey="value"
                   >
                     {calculateRiskDistribution(stats?.recent_activities ?? []).map((entry, index) => (
-                      <Cell 
-                        key={`cell-${index}`} 
-                        fill={RISK_COLORS[entry.name as keyof typeof RISK_COLORS]} 
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={RISK_COLORS[entry.name as keyof typeof RISK_COLORS]}
                       />
                     ))}
                   </Pie>
@@ -252,6 +267,36 @@ const Dashboard = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* Settings Card */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Settings</CardTitle>
+            <CardDescription>Manage your settings</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center space-x-4">
+              <Label htmlFor="alerts-toggle" className="text-sm font-medium">
+                Enable Alerts
+              </Label>
+              <Switch
+                id="alerts-toggle"
+                checked={alertsEnabled}
+                onChange={() => setAlertsEnabled(!alertsEnabled)}
+              />
+            </div>
+            <div className="flex items-center space-x-4 mt-4">
+              <Label htmlFor="youtube-activity-toggle" className="text-sm font-medium">
+                Enable YouTube Activity
+              </Label>
+              <Switch
+                id="youtube-activity-toggle"
+                checked={youtubeActivityEnabled}
+                onChange={() => setYoutubeActivityEnabled(!youtubeActivityEnabled)}
+              />
+            </div>
+          </CardContent>
+        </Card>
 
         {/* ML Model Updates Card */}
         <Card>

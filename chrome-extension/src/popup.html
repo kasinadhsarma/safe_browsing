@@ -1,61 +1,176 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Safe Browsing Activity</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Safe Browsing for Kids</title>
+    <style>
+        body {
+            width: 300px;
+            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .header img {
+            width: 32px;
+            height: 32px;
+            margin-right: 12px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 18px;
+            color: #1a73e8;
+        }
+        .status {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+        }
+        .status-label {
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        .status-value {
+            display: flex;
+            align-items: center;
+            color: #1e8e3e;
+        }
+        .status-value.unsafe {
+            color: #d93025;
+        }
+        .toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #1a73e8;
+        }
+        input:checked + .slider:before {
+            transform: translateX(16px);
+        }
+        .stats {
+            border-top: 1px solid #dadce0;
+            padding-top: 16px;
+            margin-top: 16px;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .actions {
+            margin-top: 16px;
+            display: flex;
+            gap: 8px;
+        }
+        .button {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .button-primary {
+            background-color: #1a73e8;
+            color: white;
+        }
+        .button-secondary {
+            background-color: #f8f9fa;
+            border: 1px solid #dadce0;
+        }
+    </style>
 </head>
-<link rel="stylesheet" href="styles/popup.css">
 <body>
-  <div class="header">
-    <img src="icons/icon48.png" alt="SafeNet Logo">
-    <span class="title">Safe Browsing Activity</span>
-  </div>
-
-  <div class="container">
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-value" id="total">0</div>
-        <div class="stat-label">Total Sites</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" id="blocked">0</div>
-        <div class="stat-label">Blocked</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" id="allowed">0</div>
-        <div class="stat-label">Allowed</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" id="visited">0</div>
-        <div class="stat-label">Visited</div>
-      </div>
+    <div class="header" role="banner">
+        <img src="icons/icon48.png" alt="Safe Browsing for Kids Logo">
+        <h1>Safe Browsing for Kids</h1>
     </div>
 
-    <div class="activity-section">
-      <div class="section-header">
-        <span class="section-title">Recent Activity</span>
-      </div>
-      <div class="filters">
-        <button class="filter-btn active" data-filter="all">All</button>
-        <button class="filter-btn" data-filter="blocked">Blocked</button>
-        <button class="filter-btn" data-filter="allowed">Allowed</button>
-        <button class="filter-btn" data-filter="visited">Visited</button>
-        <button class="filter-btn" data-filter="history">History</button>
-      </div>
-      <div id="recent-activity"></div>
-    </div>
+    <main role="main">
+        <div class="status">
+            <div class="status-label" id="status-label">Current Page Status:</div>
+            <div id="status-value" class="status-value" aria-labelledby="status-label">
+                Checking...
+            </div>
+        </div>
 
-    <div class="activity-section">
-      <div class="section-header">
-        <span class="section-title">Risk Distribution</span>
-      </div>
-      <div id="risk-distribution" class="risk-distribution"></div>
-    </div>
+        <div class="toggle">
+            <label for="protection-toggle" class="toggle-label">Protection</label>
+            <label class="toggle-switch" aria-label="Toggle protection">
+                <input type="checkbox" id="protection-toggle" checked 
+                       title="Enable or disable protection"
+                       aria-label="Toggle protection">
+                <span class="slider"></span>
+            </label>
+        </div>
 
-    <a href="/app/activity" target="_blank" class="view-all">View Full Activity</a>
-  </div>
+        <div class="stats" role="region" aria-label="Protection Statistics">
+            <div class="stat-row">
+                <span id="sites-checked-label">Sites Checked:</span>
+                <span id="sites-checked" aria-labelledby="sites-checked-label">0</span>
+            </div>
+            <div class="stat-row">
+                <span id="threats-blocked-label">Threats Blocked:</span>
+                <span id="threats-blocked" aria-labelledby="threats-blocked-label">0</span>
+            </div>
+            <div class="stat-row">
+                <span id="risk-level-label">Risk Level:</span>
+                <span id="risk-level" aria-labelledby="risk-level-label">Low</span>
+            </div>
+        </div>
 
-  <script src="scripts/popup.js"></script>
+        <div class="actions">
+            <button id="dashboard-btn" class="button button-primary" aria-label="Open Dashboard">
+                Dashboard
+            </button>
+            <button id="settings-btn" class="button button-secondary" aria-label="Open Settings">
+                Settings
+            </button>
+        </div>
+    </main>
+
+    <script src="scripts/popup.js"></script>
 </body>
 </html>

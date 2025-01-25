@@ -1,0 +1,124 @@
+2025-01-25 00:49:54,829 - WARNING - URL model not loaded
+2025-01-25 00:49:54,830 - ERROR - Error checking URL: log_activity() takes 1 positional argument but 2 were given
+2025-01-25 00:51:18,287 - WARNING - URL model not loaded
+2025-01-25 00:51:18,288 - ERROR - Error checking URL: log_activity() takes 1 positional argument but 2 were given
+2025-01-25 00:51:36,098 - WARNING - URL model not loaded
+2025-01-25 00:51:36,098 - ERROR - Error checking URL: log_activity() takes 1 positional argument but 2 were given
+2025-01-25 00:51:36,358 - WARNING - URL model not loaded
+2025-01-25 00:51:36,358 - ERROR - Error checking URL: log_activity() takes 1 positional argument but 2 were given
+2025-01-25 00:52:29,174 - WARNING - URL model not loaded
+2025-01-25 00:52:29,181 - ERROR - Error checking URL: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('e51dca9d80f340abb5f00df417d72cae', 'https://wakatime.com/', '2025-01-24 19:22:29.174802', 'checking', 'General', 'Unknown', 'null')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 00:52:29,182 - WARNING - URL model not loaded
+2025-01-25 00:52:29,184 - ERROR - Error checking URL: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('9d6cd2bdf2991f67499ca8903e146b69', 'https://wakatime.com/dashboard', '2025-01-24 19:22:29.183106', 'checking', 'General', 'Unknown', 'null')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 00:55:10,844 - WARNING - URL model not loaded
+2025-01-25 00:55:10,845 - ERROR - Error checking URL: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('15268171472143333496fc7c801b09da', 'https://wakatime.com/dashboard', '2025-01-24 19:25:10.844711', 'checking', 'General', 'Unknown', 'null')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 00:55:33,932 - WARNING - URL model not loaded
+2025-01-25 00:55:33,935 - ERROR - Error checking URL: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('68ec57d9116cf7aa9bb81a9e9d90bea7', 'https://wakatime.com/dashboard', '2025-01-24 19:25:33.933231', 'checking', 'General', 'Unknown', 'null')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 00:55:43,037 - WARNING - URL model not loaded
+2025-01-25 00:55:43,039 - ERROR - Error checking URL: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('0d14902b843006ce0c2d33d610704c29', 'https://wakatime.com/dashboard', '2025-01-24 19:25:43.037909', 'checking', 'General', 'Unknown', 'null')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 00:59:57,114 - WARNING - URL model not loaded
+2025-01-25 00:59:57,117 - ERROR - Error logging activity: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('e2f3775230079e6f0fa68148a05e828f', 'chrome://extensions/', '2025-01-24 19:29:57.114579', 'checking', 'General', 'Unknown', 'null')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 00:59:57,118 - ERROR - Error checking URL: 
+2025-01-25 01:01:25,851 - WARNING - URL model not loaded
+2025-01-25 01:01:25,854 - ERROR - Error logging activity: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('57d15d702584c42146e39762bf03739f', 'https://platform.deepseek.com/usage', '2025-01-24 19:31:25.851764', 'checking', 'General', 'Unknown', 'null')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 01:01:25,854 - ERROR - Error checking URL: 
+2025-01-25 01:07:24,735 - WARNING - URL model not loaded
+2025-01-25 01:07:24,739 - ERROR - Error logging activity: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('789b8b014bdecc8fa31a6ab7329c1bcd', 'https://platform.deepseek.com/usage', '2025-01-24 19:37:24.735919', 'checking', 'General', 'Unknown', 'null')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 01:07:24,740 - ERROR - Error checking URL: 
+2025-01-25 01:23:42,301 - ERROR - Error logging activity: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('4f331d63c0878dc4d0a3e3172c5974a6', 'https://github.com/cline/cline', '2025-01-24 19:53:42.294150', 'allowed', 'Safe', 'Low', '{"pattern_match": {"method": "pattern", "match": null}}')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 01:23:42,302 - ERROR - Error checking URL: 
+2025-01-25 01:23:57,211 - ERROR - Error logging activity: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('f5c641475b09a8175098bddf01c4066f', 'https://github.com/cline/cline', '2025-01-24 19:53:57.210745', 'allowed', 'Safe', 'Low', '{"pattern_match": {"method": "pattern", "match": null}}')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 01:23:57,211 - ERROR - Error checking URL: 
+2025-01-25 01:24:37,291 - ERROR - Error logging activity: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('e79ad6871e18f5f897e64c55ea963129', 'https://github.com/cline/cline', '2025-01-24 19:54:37.290791', 'allowed', 'Safe', 'Low', '{"pattern_match": {"method": "pattern", "match": null}}')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 01:24:37,292 - ERROR - Error checking URL: 
+2025-01-25 01:24:58,886 - WARNING - URL model not loaded
+2025-01-25 01:24:58,887 - ERROR - Error logging activity: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('5b6e4db412b273375ab287a128cd12af', 'http://localhost:3000/dashboard/settings', '2025-01-24 19:54:58.886743', 'allowed', 'General', 'Unknown', '{}')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 01:24:58,888 - ERROR - Error checking URL: 
+2025-01-25 01:25:03,375 - WARNING - URL model not loaded
+2025-01-25 01:25:03,377 - ERROR - Error logging activity: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('137b03bb4f62d9128fc6a4d0dc1bbecd', 'http://localhost:3000/dashboard/alerts', '2025-01-24 19:55:03.375705', 'allowed', 'General', 'Unknown', '{}')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 01:25:03,378 - ERROR - Error checking URL: 
+2025-01-25 01:25:06,191 - WARNING - URL model not loaded
+2025-01-25 01:25:06,193 - ERROR - Error logging activity: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('88049521865b44d84807ac37660b801c', 'http://localhost:3000/dashboard/activity', '2025-01-24 19:55:06.192374', 'allowed', 'General', 'Unknown', '{}')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 01:25:06,193 - ERROR - Error checking URL: 
+2025-01-25 01:25:09,390 - WARNING - URL model not loaded
+2025-01-25 01:25:09,392 - ERROR - Error logging activity: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('a4a229a5eae4ae5c3af240a60150e1ad', 'http://localhost:3000/dashboard', '2025-01-24 19:55:09.391105', 'allowed', 'General', 'Unknown', '{}')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 01:25:09,392 - ERROR - Error checking URL: 
+2025-01-25 01:25:14,217 - WARNING - URL model not loaded
+2025-01-25 01:25:14,218 - ERROR - Error logging activity: (sqlite3.OperationalError) table activities has no column named ml_scores
+[SQL: INSERT INTO activities (id, url, timestamp, action, category, risk_level, ml_scores) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('97f14b232e0eaf7bcf7a3b1e758daf4a', 'http://localhost:3000/dashboard/search', '2025-01-24 19:55:14.217414', 'allowed', 'General', 'Unknown', '{}')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-01-25 01:25:14,219 - ERROR - Error checking URL: 
+2025-01-25 01:27:59,698 - WARNING - URL model not loaded
+2025-01-25 01:27:59,699 - ERROR - Error logging activity: The argument passed to Dialect.has_table() should be a <class 'sqlalchemy.engine.base.Connection'>, got <class 'sqlalchemy.engine.base.Engine'>. Additionally, the Dialect.has_table() method is for internal dialect use only; please use ``inspect(some_engine).has_table(<tablename>>)`` for public API use.
+2025-01-25 01:27:59,699 - ERROR - Error checking URL: 
+2025-01-25 01:28:04,737 - WARNING - URL model not loaded
+2025-01-25 01:28:04,738 - ERROR - Error logging activity: The argument passed to Dialect.has_table() should be a <class 'sqlalchemy.engine.base.Connection'>, got <class 'sqlalchemy.engine.base.Engine'>. Additionally, the Dialect.has_table() method is for internal dialect use only; please use ``inspect(some_engine).has_table(<tablename>>)`` for public API use.
+2025-01-25 01:28:04,738 - ERROR - Error checking URL: 
+2025-01-25 01:28:06,890 - WARNING - URL model not loaded
+2025-01-25 01:28:06,890 - ERROR - Error logging activity: The argument passed to Dialect.has_table() should be a <class 'sqlalchemy.engine.base.Connection'>, got <class 'sqlalchemy.engine.base.Engine'>. Additionally, the Dialect.has_table() method is for internal dialect use only; please use ``inspect(some_engine).has_table(<tablename>>)`` for public API use.
+2025-01-25 01:28:06,891 - ERROR - Error checking URL: 
+2025-01-25 01:28:08,500 - WARNING - URL model not loaded
+2025-01-25 01:28:08,501 - ERROR - Error logging activity: The argument passed to Dialect.has_table() should be a <class 'sqlalchemy.engine.base.Connection'>, got <class 'sqlalchemy.engine.base.Engine'>. Additionally, the Dialect.has_table() method is for internal dialect use only; please use ``inspect(some_engine).has_table(<tablename>>)`` for public API use.
+2025-01-25 01:28:08,501 - ERROR - Error checking URL: 
+2025-01-25 01:28:10,526 - WARNING - URL model not loaded
+2025-01-25 01:28:10,527 - ERROR - Error logging activity: The argument passed to Dialect.has_table() should be a <class 'sqlalchemy.engine.base.Connection'>, got <class 'sqlalchemy.engine.base.Engine'>. Additionally, the Dialect.has_table() method is for internal dialect use only; please use ``inspect(some_engine).has_table(<tablename>>)`` for public API use.
+2025-01-25 01:28:10,527 - ERROR - Error checking URL: 
+2025-01-25 01:28:12,713 - WARNING - URL model not loaded
+2025-01-25 01:28:12,714 - ERROR - Error logging activity: The argument passed to Dialect.has_table() should be a <class 'sqlalchemy.engine.base.Connection'>, got <class 'sqlalchemy.engine.base.Engine'>. Additionally, the Dialect.has_table() method is for internal dialect use only; please use ``inspect(some_engine).has_table(<tablename>>)`` for public API use.
+2025-01-25 01:28:12,714 - ERROR - Error checking URL: 
+2025-01-25 01:29:29,062 - WARNING - URL model not loaded
+2025-01-25 01:29:29,062 - ERROR - Error logging activity: The argument passed to Dialect.has_table() should be a <class 'sqlalchemy.engine.base.Connection'>, got <class 'sqlalchemy.engine.base.Engine'>. Additionally, the Dialect.has_table() method is for internal dialect use only; please use ``inspect(some_engine).has_table(<tablename>>)`` for public API use.
+2025-01-25 01:29:29,063 - ERROR - Error checking URL: 
+2025-01-25 01:29:38,573 - WARNING - URL model not loaded
+2025-01-25 01:29:38,574 - ERROR - Error logging activity: The argument passed to Dialect.has_table() should be a <class 'sqlalchemy.engine.base.Connection'>, got <class 'sqlalchemy.engine.base.Engine'>. Additionally, the Dialect.has_table() method is for internal dialect use only; please use ``inspect(some_engine).has_table(<tablename>>)`` for public API use.
+2025-01-25 01:29:38,574 - ERROR - Error checking URL: 
+2025-01-25 01:29:57,642 - ERROR - Error logging activity: The argument passed to Dialect.has_table() should be a <class 'sqlalchemy.engine.base.Connection'>, got <class 'sqlalchemy.engine.base.Engine'>. Additionally, the Dialect.has_table() method is for internal dialect use only; please use ``inspect(some_engine).has_table(<tablename>>)`` for public API use.
+2025-01-25 01:29:57,642 - ERROR - Error checking URL: 
+2025-01-25 01:31:30,038 - ERROR - Error logging activity: The argument passed to Dialect.has_table() should be a <class 'sqlalchemy.engine.base.Connection'>, got <class 'sqlalchemy.engine.base.Engine'>. Additionally, the Dialect.has_table() method is for internal dialect use only; please use ``inspect(some_engine).has_table(<tablename>>)`` for public API use.
+2025-01-25 01:31:30,038 - ERROR - Error checking URL: 

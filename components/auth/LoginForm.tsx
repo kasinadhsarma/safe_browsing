@@ -6,21 +6,32 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
 import Link from 'next/link'
+import axios from 'axios';
 
 interface LoginFormProps {
   onSuccess: () => void // Callback for successful login
+  onError: (error: string) => void // Callback for login errors
 }
 
-export function LoginForm({ onSuccess }: LoginFormProps) {
+export function LoginForm({ onSuccess, onError }: LoginFormProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Handle login logic here
-    console.log('Login attempted with:', { email, password })
-    // Simulate successful login
-    onSuccess()
+    setError(null);
+    try {
+      const response = await axios.post('/api/login', { email, password });
+      if (response.data.success) {
+        onSuccess();
+      } else {
+        setError(response.data.message || 'Login failed');
+      }
+    } catch (err) {
+      setError('An error occurred during login');
+      onError('An error occurred during login');
+    }
   }
 
   return (
@@ -30,6 +41,9 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
         <CardDescription>Enter your credentials to access your account</CardDescription>
       </CardHeader>
       <CardContent>
+        {error && (
+          <div className="text-red-500 mb-4">{error}</div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>

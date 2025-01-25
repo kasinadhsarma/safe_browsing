@@ -1,69 +1,56 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Access Blocked - Safe Browsing for Kids</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      margin: 0;
-      background-color: #f9fafb;
-      color: #1f2937;
-    }
-    .container {
-      max-width: 600px;
-      width: 90%;
-      padding: 2rem;
-      margin: 1rem;
-      text-align: center;
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    }
-    h1 { color: #dc2626; margin-bottom: 1rem; }
-    .details { margin: 1.5rem 0; color: #4b5563; }
-    .risk-high { color: #dc2626; }
-    .risk-medium { color: #d97706; }
-    .risk-low { color: #059669; }
-    .url { 
-      background: #f3f4f6;
-      padding: 0.5rem;
-      border-radius: 4px;
-      word-break: break-all;
-      margin: 1rem 0;
-    }
-    .icon {
-      width: 64px;
-      height: 64px;
-      margin-bottom: 1rem;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Access Blocked - Safe Browsing</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f8f9fa;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        h1 {
+            color: #d32f2f;
+        }
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            background-color: #d32f2f;
+            color: white;
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <img src="icons/icon64.png" alt="SafeNet Logo" class="icon">
-<h1>⚠️ Access Blocked</h1>
-<p>This website has been blocked for your safety.</p>
-<div class="details">
-  <div><strong>URL:</strong> <span id="blocked-url" class="url"></span></div>
-  <div><strong>Category:</strong> <span id="category"></span></div>
-  <div><strong>Risk Level:</strong> <span id="risk-level"></span></div>
-</div>
-<script>
-  const params = new URLSearchParams(window.location.search);
-  document.getElementById('blocked-url').textContent = params.get('url') || 'Unknown';
-  document.getElementById('category').textContent = params.get('category') || 'Unknown';
-  const riskLevel = params.get('risk') || 'Unknown';
-  const riskElement = document.getElementById('risk-level');
-  riskElement.textContent = riskLevel;
-  riskElement.className = `risk-${riskLevel.toLowerCase()}`;
-</script>
-  </div>
+    <div class="container">
+        <h1>Access Blocked</h1>
+        <p>This website has been blocked for your safety.</p>
+        <button id="continue-btn">Continue Anyway</button>
+    </div>
+
+    <script>
+        // Get URL parameters
+        const params = new URLSearchParams(window.location.search);
+        const url = decodeURIComponent(params.get('url') || '');
+
+        // Add event listener for the "Continue Anyway" button
+        document.getElementById('continue-btn').addEventListener('click', () => {
+            window.location.href = url;
+        });
+    </script>
 </body>
 </html>

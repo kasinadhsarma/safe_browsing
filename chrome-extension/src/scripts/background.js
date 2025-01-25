@@ -1,115 +1,184 @@
-const recentUrlChecks = new Map();
-const API_BASE_URL = 'http://localhost:8000/api';
+// Background script for Safe Browsing extension
 
-const KNOWN_SAFE_DOMAINS = {
-  'youtube.com': true,
-  'www.youtube.com': true,
-  'vimeo.com': true,
-  'www.vimeo.com': true,
-  'netflix.com': true,
-  'www.netflix.com': true,
-  'disney.com': true,
-  'www.disney.com': true,
-  'google.com': true,
-  'www.google.com': true,
-  'facebook.com': true,
-  'www.facebook.com': true,
-  'twitter.com': true,
-  'www.twitter.com': true
+// Configuration
+const API_ENDPOINT = 'http://localhost:8000/api';
+const CHECK_URL_ENDPOINT = `${API_ENDPOINT}/check-url`;
+const LOG_ACTIVITY_ENDPOINT = `${API_ENDPOINT}/activity`;
+
+// Initialize settings
+chrome.runtime.onInstalled.addListener(() => {
+    chrome.storage.sync.set({
+        blockingEnabled: true,
+        alertsEnabled: true,
+        statsCollectionEnabled: true
+    });
+});
+
+// Caches
+const urlCache = new Map();
+const statsCache = {
+    totalSites: 0,
+    blockedSites: 0,
+    lastUpdate: 0
 };
 
-async function logErrorWithRetry(error, retryCount = 3) {
-  for (let i = 0; i < retryCount; i++) {
+// Clear caches periodically (every hour)
+setInterval(() => {
+    urlCache.clear();
+    statsCache.lastUpdate = 0;
+}, 3600000);
+
+// Function to update stats
+async function updateStats() {
     try {
-      await sendErrorToServer(error);
-      console.error(`Error logged successfully on attempt ${i + 1}`);
-      return;
-    } catch (e) {
-      console.error(`Error attempt ${i + 1}:`, e);
-      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+        const response = await fetch(`${API_ENDPOINT}/stats`);
+        if (!response.ok) throw new Error('Failed to fetch stats');
+        const stats = await response.json();
+        
+        statsCache.totalSites = stats.total_sites;
+        statsCache.blockedSites = stats.blocked_sites;
+        statsCache.lastUpdate = Date.now();
+        
+        // Notify popup of updated stats
+        chrome.runtime.sendMessage({
+            type: 'statsUpdate',
+            stats: {
+                total_sites: statsCache.totalSites,
+                blocked_sites: statsCache.blockedSites
+            }
+        });
+    } catch (error) {
+        console.error('Error updating stats:', error);
     }
-  }
-  console.error('Failed to log error after retries:', error);
 }
 
-async function sendErrorToServer(error) {
-  try {
-    await fetch(`${API_BASE_URL}/log-error`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      mode: 'cors',
-      credentials: 'include',
-      body: JSON.stringify({
-        error: error.message,
-        timestamp: new Date().toISOString(),
-        stack: error.stack
-      })
+async function checkUrl(url) {
+    try {
+        // Check cache first
+        if (urlCache.has(url)) {
+            return urlCache.get(url);
+        }
+
+        // Prepare form data
+        const formData = new FormData();
+        formData.append('url', url);
+
+        // Make API request
+        const response = await fetch(CHECK_URL_ENDPOINT, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        // Cache the result
+        urlCache.set(url, result);
+
+        // Log activity
+        await logActivity(url, result);
+
+        return result;
+    } catch (error) {
+        console.error('Error checking URL:', error);
+        return { blocked: false, error: true };
+    }
+}
+
+// Update stats every 5 seconds
+setInterval(updateStats, 5000);
+
+async function logActivity(url, result) {
+    // Update local stats immediately
+    statsCache.totalSites++;
+    if (result.blocked) statsCache.blockedSites++;
+    try {
+        const activity = {
+            url,
+            action: result.blocked ? 'blocked' : 'allowed',
+            category: result.category || 'Unknown',
+            risk_level: result.risk_level || 'Unknown',
+            timestamp: new Date().toISOString()
+        };
+
+        const formData = new FormData();
+        formData.append('url', activity.url);
+        formData.append('action', activity.action);
+        formData.append('category', activity.category);
+        formData.append('risk_level', activity.risk_level);
+        formData.append('ml_scores', JSON.stringify(result.predictions || {}));
+
+        await fetch(LOG_ACTIVITY_ENDPOINT, {
+            method: 'POST',
+            body: formData
+        });
+    } catch (error) {
+        console.error('Error logging activity:', error);
+    }
+}
+
+// Handle navigation events
+chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
+    // Skip non-main-frame navigations and extension pages
+    if (details.frameId !== 0 || details.url.startsWith('chrome-extension://')) {
+        return;
+    }
+
+    try {
+        const settings = await chrome.storage.sync.get(['blockingEnabled']);
+        if (!settings.blockingEnabled) return;
+
+        const result = await checkUrl(details.url);
+        
+        if (result.blocked) {
+            // Redirect to blocked page
+            chrome.tabs.update(details.tabId, {
+                url: chrome.runtime.getURL('src/blocked.html') + 
+                     `?url=${encodeURIComponent(details.url)}` +
+                     `&category=${encodeURIComponent(result.category || 'Unknown')}` +
+                     `&risk_level=${encodeURIComponent(result.risk_level || 'High')}` +
+                     `&probability=${encodeURIComponent(result.probability || '0')}`
+            });
+        }
+    } catch (error) {
+        console.error('Error in navigation handler:', error);
+    }
+});
+
+// Handle messages from content script
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.type === 'checkUrl') {
+        checkUrl(request.url)
+            .then(result => sendResponse(result))
+            .catch(error => sendResponse({ error: true }));
+        return true; // Will respond asynchronously
+    }
+});
+
+// Update badge when blocking is toggled
+chrome.storage.onChanged.addListener((changes) => {
+    if (changes.blockingEnabled) {
+        const enabled = changes.blockingEnabled.newValue;
+        chrome.action.setBadgeText({ text: enabled ? 'ON' : 'OFF' });
+        chrome.action.setBadgeBackgroundColor({ 
+            color: enabled ? '#1a73e8' : '#666666' 
+        });
+        
+        // Force an immediate stats update when protection is toggled
+        if (enabled) {
+            updateStats();
+        }
+    }
+});
+
+// Initialize badge
+chrome.storage.sync.get(['blockingEnabled'], (result) => {
+    const enabled = result.blockingEnabled ?? true;
+    chrome.action.setBadgeText({ text: enabled ? 'ON' : 'OFF' });
+    chrome.action.setBadgeBackgroundColor({ 
+        color: enabled ? '#1a73e8' : '#666666' 
     });
-  } catch (e) {
-    console.error('Failed to send error to server:', e);
-  }
-}
-
-function normalizeUrl(url) {
-  try {
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      url = 'http://' + url;
-    }
-    const urlObj = new URL(url);
-    return urlObj.origin + urlObj.pathname;
-  } catch (e) {
-    console.error('Error normalizing URL:', e);
-    return url;
-  }
-}
-
-function analyzeDomain(url) {
-  try {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname.toLowerCase();
-    const path = urlObj.pathname.toLowerCase();
-    const query = urlObj.search.toLowerCase();
-
-    if (KNOWN_SAFE_DOMAINS[hostname]) {
-      return { category: 'Safe Site', riskLevel: 'Low' };
-    }
-
-    if (hostname.match(/(facebook|twitter|instagram|linkedin|tiktok|reddit|snapchat)\.(com|org)/i)) {
-      return { category: 'Social Media', riskLevel: 'Low' };
-    }
-
-    if (hostname.match(/(youtube|vimeo|twitch|netflix|disney|hulu)\.(com|tv)/i)) {
-      return { category: 'Video', riskLevel: 'Low' };
-    }
-
-    if (hostname.match(/(coursera|udemy|edx|khanacademy|mit|edu)\.(org|com|edu)/i)) {
-      return { category: 'Educational', riskLevel: 'Low' };
-    }
-
-    if (hostname.match(/(minecraft|roblox|fortnite|gaming|steam|epicgames)\.(com|net)/i)) {
-      return { category: 'Gaming', riskLevel: 'Low' };
-    }
-
-    if (hostname.match(/(news|cnn|bbc|nytimes|reuters)\.(com|org|net)/i)) {
-      return { category: 'News', riskLevel: 'Low' };
-    }
-
-    if (hostname.match(/(chat\.openai|bard\.google|bing|claude)\.(com|ai)/i)) {
-      return { category: 'AI Chat', riskLevel: 'Low' };
-    }
-
-    if (hostname.match(/(google|bing|yahoo|duckduckgo)\.(com|org)/i)) {
-      return { category: 'Search', riskLevel: 'Low' };
-    }
-
-    const riskPatterns = {
-      gambling: {
-        domains: /(gambling|casino|bet|poker|lottery|blackjack|roulette|slot|bingo)\.(com|net|org|xyz|app|bet|game)/i,
-        paths: /(gambling|casino|betting|wager|poker)/i
-      },
-      adult: {
-        domains: /(adult|xxx|porn|sex|nude|escort|dating|cam|strip|playboy|ass|boob|dick|pussy|milf|teen|mature|hentai|nsfw)\.(com|net|org|xyz|app|xxx|sex|adult|porn)/i,
-        paths: /(porn|xxx|adult|nsfw|sex|nude|naked|escort|pussy
+});

@@ -1,30 +1,67 @@
-from fastapi import FastAPI, HTTPException, Form, Request
+"""
+Safe Browsing for Kids Under Parental Supervision Using Machine Learning
+
+ABSTRACT:
+Since birth, 21st century children have access to various websites through their devices. However, not all internet content is child-friendly, and children may encounter violent or inappropriate images that can negatively impact their development. Many websites contain ads that may display unsuitable content. This system provides parental controls using three supervised machine learning techniques (K-Nearest Neighbor, Support Vector Machine, and Naive Bayes Classifier) for URL classification, combined with deep learning for image detection to block inappropriate content.
+
+Key Features:
+1. Parental control settings for different age groups
+2. Real-time URL classification using ensemble ML models
+3. Image content detection using deep learning
+4. Detailed activity logging and reporting
+5. Customizable risk thresholds for different age groups
+"""
+
+from fastapi import FastAPI, HTTPException, Form, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import torch
-from ml.ai.training import URLClassifier, train
-from ml.ai.dataset import URLDataset
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ml.ai.training import train_models, ensemble_predict
+from ml.ai.dataset import extract_url_features, generate_dataset
+from ml.ai.image_classification import ImageClassifier
 import os
 import logging
 import re
+import json
+import traceback
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
-from sqlalchemy import create_engine, Column, String, DateTime, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from pydantic import BaseModel
+from sqlalchemy import (
+    create_engine, Column, String, DateTime, Text, select,
+    Boolean, Integer, JSON, Float, inspect
+)
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from pydantic import BaseModel, ConfigDict
+import tempfile
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('safebrowsing.log'),
+        logging.StreamHandler()
+    ]
+)
 
 # Database setup
-DATABASE_URL = "sqlite:///./safebrowsing.db"
-engine = create_engine(DATABASE_URL)
+DATABASE_PATH = "./safebrowsing.db"
+if os.path.exists(DATABASE_PATH):
+    os.remove(DATABASE_PATH)  # Remove existing database to avoid schema conflicts
+DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False}
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Global ML model
-ml_model: Optional[URLClassifier] = None
+# Global ML models
+url_model: Optional[Dict] = None
+image_model: Optional[ImageClassifier] = None
 
 # Database Models
 class Activity(Base):
@@ -32,434 +69,320 @@ class Activity(Base):
     id = Column(String, primary_key=True)
     url = Column(String)
     timestamp = Column(DateTime, default=datetime.utcnow)
-    action = Column(String)
-    category = Column(String, nullable=True)
-    risk_level = Column(String, nullable=True)
+    action = Column(String)  # blocked, allowed, override
+    category = Column(String)
+    risk_level = Column(String)
+    ml_scores = Column(JSON, nullable=True)  # Store detailed ML predictions
 
-class ErrorLog(Base):
-    __tablename__ = "error_logs"
+class Setting(Base):
+    __tablename__ = "settings"
+    id = Column(String, primary_key=True)
+    key = Column(String, unique=True)
+    value = Column(JSON)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+class MLMetrics(Base):
+    __tablename__ = "ml_metrics"
     id = Column(String, primary_key=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
-    error = Column(String)
-    stack = Column(Text, nullable=True)
-    url = Column(String, nullable=True)
+    model_name = Column(String)
+    accuracy = Column(Float)
+    precision = Column(Float)
+    recall = Column(Float)
+    f1_score = Column(Float)
+    training_data_size = Column(Integer)
+
+# Create all tables
+try:
+    Base.metadata.create_all(bind=engine)
+    logging.info("Database tables created successfully")
+except Exception as e:
+    logging.error(f"Error creating database tables: {e}")
+    raise
 
 # Pydantic models
-class ActivityCreate(BaseModel):
-    url: str
-    action: str
-    category: Optional[str] = None
-    timestamp: Optional[datetime] = None
-
-class ActivityResponse(BaseModel):
-    url: str
-    timestamp: datetime
-    action: str
-    category: Optional[str] = None
-    risk_level: Optional[str] = None
-
 class DashboardStats(BaseModel):
     total_sites: int
     blocked_sites: int
-    allowed_sites: int
-    visited_sites: int
-    recent_activities: List[ActivityResponse]
-    daily_stats: Dict[str, int]
+    recent_activities: List[Dict[str, Any]]
+    ml_metrics: Dict[str, Dict[str, float]]
+    risk_distribution: Dict[str, int]
 
-class ErrorLogCreate(BaseModel):
-    error: str
-    stack: Optional[str] = None
-    timestamp: Optional[datetime] = None
-    url: Optional[str] = None
-
-def get_domain_category(url: str) -> str:
-    """Helper function to categorize URLs."""
-    try:
-        from urllib.parse import urlparse
-        domain = urlparse(url).netloc.lower()
-        
-        # Video platforms
-        if any(x in domain for x in ['youtube.com', 'vimeo.com', 'netflix.com']):
-            return 'Video'
-        
-        # Social media
-        if any(x in domain for x in ['facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com']):
-            return 'Social Media'
-        
-        # Search engines
-        if any(x in domain for x in ['google.com', 'bing.com', 'yahoo.com']):
-            return 'Search'
-        
-        # Educational
-        if any(x in domain for x in ['coursera.org', 'udemy.com', 'edx.org']) or '.edu' in domain:
-            return 'Educational'
-        
-        # News
-        if any(x in domain for x in ['news', 'cnn.com', 'bbc.com', 'nytimes.com']):
-            return 'News'
-
-        return 'General'
-    except:
-        return 'Unknown'
-
-def check_url_patterns(url: str) -> Dict[str, Any]:
-    """Check URL using pattern matching."""
-    try:
-        from urllib.parse import urlparse
-        parsed = urlparse(url)
-        hostname = parsed.netloc.lower()
-        path = parsed.path.lower()
-        query = parsed.query.lower()
-
-        # Known safe domains
-        safe_domains = {
-            'youtube.com', 'www.youtube.com',
-            'google.com', 'www.google.com',
-            'facebook.com', 'www.facebook.com',
-            'twitter.com', 'www.twitter.com',
-            'netflix.com', 'www.netflix.com',
-            'disney.com', 'www.disney.com'
-        }
-
-        if hostname in safe_domains:
-            return {
-                "blocked": False,
-                "category": "Safe",
-                "risk_level": "Low",
-                "method": "pattern"
-            }
-
-        # Check for inappropriate content
-        risk_patterns = {
-            "adult": r"(adult|xxx|porn|sex|nude|escort|dating|cam|strip|playboy|nsfw)",
-            "gambling": r"(gambling|casino|bet|poker|lottery|blackjack|roulette|slot)",
-            "violence": r"(gore|violence|death|torture|weapon|drug|cartel)",
-            "malware": r"(crack|warez|keygen|hack|torrent|pirate|stolen)",
-            "phishing": r"(phish|scam|fake|fraud|spam)"
-        }
-
-        full_url = (hostname + path + query).lower()
-        for category, pattern in risk_patterns.items():
-            if re.search(pattern, full_url, re.IGNORECASE):
-                return {
-                    "blocked": True,
-                    "category": category.capitalize(),
-                    "risk_level": "High",
-                    "method": "pattern"
-                }
-
-        return None
-
-    except Exception as e:
-        logging.error(f"Error in pattern matching: {e}")
-        return None
-
-def check_url_ml(url: str) -> Dict[str, Any]:
-    """Check URL using ML model."""
-    try:
-        if not ml_model:
-            logging.warning("ML model not loaded, skipping ML check")
-            return None
-
-        # Extract features
-        dataset = URLDataset([url], [0])
-        features = dataset[0]['features']
-
-        # Make prediction
-        with torch.no_grad():
-            prediction = ml_model(features.unsqueeze(0))
-            probability = prediction.item()
-
-        return {
-            "blocked": probability > 0.8,
-            "category": "ML Detected" if probability > 0.8 else get_domain_category(url),
-            "risk_level": "High" if probability > 0.8 else "Low",
-            "probability": float(probability),
-            "method": "ml"
-        }
-
-    except Exception as e:
-        logging.error(f"Error in ML check: {e}")
-        return None
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Lifespan function to manage the FastAPI app lifecycle."""
-    global ml_model
-    model_path = 'ml/ai/models/url_classifier_final.pth'
-
-    # Create database tables
-    Base.metadata.create_all(bind=engine)
-    logging.info("Database tables created")
-
-    # Load ML model if available
-    try:
-        if os.path.exists(model_path):
-            ml_model = URLClassifier()
-            ml_model.load_state_dict(torch.load(model_path, weights_only=True))
-            ml_model.eval()
-            logging.info("ML model loaded successfully")
-        else:
-            logging.warning("ML model not found, running without ML capabilities")
-    except Exception as e:
-        logging.error(f"Error loading ML model: {e}")
-        ml_model = None
-
-    yield
-
-    # Cleanup
-    logging.info("Shutting down the app")
-
-app = FastAPI(lifespan=lifespan)
+# FastAPI App
+app = FastAPI(
+    title="Safe Browsing API",
+    description="API for Safe Browsing extension with ML-powered content filtering",
+    version="1.0.0"
+)
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["chrome-extension://*", "http://localhost:3000", "http://localhost:8000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"]
 )
 
-@app.post("/api/log-error")
-async def log_error(error: ErrorLogCreate) -> Dict[str, str]:
-    """Endpoint to log errors from the extension."""
+# Lifecycle Events
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup and shutdown events"""
+    global url_model, image_model
+    
     try:
-        db = SessionLocal()
-        error_log = ErrorLog(
-            id=os.urandom(16).hex(),
-            error=error.error,
-            stack=error.stack,
-            timestamp=error.timestamp or datetime.utcnow(),
-            url=error.url
-        )
-        db.add(error_log)
-        db.commit()
-        db.close()
-        
-        logging.error(f"Extension error: {error.error}")
-        if error.stack:
-            logging.error(f"Stack trace: {error.stack}")
+        # Train models
+        logging.info("Training URL classification models...")
+        url_model = train_models()
+        if url_model:
+            logging.info("URL classification models loaded successfully")
+        else:
+            logging.warning("URL models not loaded")
             
-        return {"status": "logged"}
+        yield
+        
     except Exception as e:
-        logging.error(f"Error logging extension error: {e}")
+        logging.error(f"Startup error: {e}")
+        raise
+    finally:
+        logging.info("Shutting down")
+
+app.lifespan = lifespan
+
+@app.get("/api/stats")
+async def get_stats():
+    """Get dashboard statistics"""
+    db = SessionLocal()
+    try:
+        # Get recent activities
+        activities = db.query(Activity)\
+            .order_by(Activity.timestamp.desc())\
+            .limit(10)\
+            .all()
+
+        # Calculate stats
+        total = db.query(Activity).count()
+        blocked = db.query(Activity)\
+            .filter(Activity.action == "blocked")\
+            .count()
+
+        # Get risk distribution
+        risk_dist = {}
+        for risk in ["Low", "Medium", "High"]:
+            count = db.query(Activity)\
+                .filter(Activity.risk_level == risk)\
+                .count()
+            risk_dist[risk] = count
+
+        # Get ML metrics (if any models have been trained)
+        ml_metrics = {}
+        if url_model:
+            for name, data in url_model.items():
+                if 'metrics' in data:
+                    ml_metrics[name] = data['metrics']
+
+        return {
+            "total_sites": total,
+            "blocked_sites": blocked,
+            "recent_activities": [
+                {
+                    "url": a.url,
+                    "timestamp": a.timestamp.isoformat(),
+                    "action": a.action,
+                    "category": a.category,
+                    "risk_level": a.risk_level,
+                    "ml_scores": a.ml_scores
+                } for a in activities
+            ],
+            "ml_metrics": ml_metrics,
+            "risk_distribution": risk_dist
+        }
+    except Exception as e:
+        logging.error(f"Error getting stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+class URLCheckRequest(BaseModel):
+    url: str
+    age_group: str = "kid"  # Default to most restrictive setting
 
 @app.post("/api/check-url")
-async def check_url(url: str = Form(...)) -> Dict[str, Any]:
-    """Endpoint to check if a URL should be blocked."""
+async def check_url(url: str = Form(...), age_group: str = Form("kid")):
+    """Check if a URL should be blocked"""
     try:
-        # First try pattern matching
-        pattern_result = check_url_patterns(url)
-        if pattern_result is not None:
-            logging.info(f"URL {url} checked via pattern matching")
-            
-            # Store the activity
-            db = SessionLocal()
-            activity = Activity(
-                id=os.urandom(16).hex(),
-                url=url,
-                action="blocked" if pattern_result["blocked"] else "allowed",
-                category=pattern_result["category"],
-                risk_level=pattern_result["risk_level"]
-            )
-            db.add(activity)
-            db.commit()
-            db.close()
-            
-            return pattern_result
+        # Extract features
+        features = extract_url_features(url)
+        if not features:
+            result = {
+                "blocked": False,
+                "risk_level": "Unknown",
+                "category": "Unknown",
+                "probability": 0.0,
+                "predictions": {}
+            }
+        else:
+            # Make prediction with age-based risk assessment
+            if url_model:
+                is_blocked, risk_score, predictions = ensemble_predict(
+                    list(features.values()),
+                    threshold=0.7 if age_group == "kid" else 0.8,
+                    models_dir='ml/ai/models/',
+                    age_group=age_group
+                )
+                
+                result = {
+                    "blocked": is_blocked,
+                    "risk_level": predictions["risk_level"],
+                    "risk_score": float(risk_score),
+                    "age_group": age_group,
+                    "category": "Malicious" if is_blocked else "Safe",
+                    "predictions": predictions["model_predictions"],
+                    "unsafe_content": {
+                        "kid_unsafe": predictions.get("kid_unsafe_words", 0),
+                        "teen_unsafe": predictions.get("teen_unsafe_words", 0)
+                    },
+                    "security_flags": {
+                        "suspicious_tld": features.get("suspicious_tld", 0),
+                        "is_ip_address": features.get("is_ip_address", 0),
+                        "has_https": features.get("has_https", 1)
+                    }
+                }
+            else:
+                result = {
+                    "blocked": False,
+                    "risk_level": "Unknown",
+                    "probability": 0.0,
+                    "predictions": {},
+                    "category": "Unknown",
+                    "ml_scores": {
+                        "knn": 0.0,
+                        "svm": 0.0,
+                        "nb": 0.0
+                    }
+                }
 
-        # If pattern matching is inconclusive, try ML
-        ml_result = check_url_ml(url)
-        if ml_result is not None:
-            logging.info(f"URL {url} checked via ML")
-            
-            # Store the activity
-            db = SessionLocal()
-            activity = Activity(
-                id=os.urandom(16).hex(),
-                url=url,
-                action="blocked" if ml_result["blocked"] else "allowed",
-                category=ml_result["category"],
-                risk_level=ml_result["risk_level"]
-            )
-            db.add(activity)
-            db.commit()
-            db.close()
-            
-            return ml_result
-
-        # If both methods fail, return safe default
-        return {
-            "blocked": False,
-            "category": get_domain_category(url),
-            "risk_level": "Low",
-            "method": "default"
-        }
-
-    except Exception as e:
-        logging.error(f"Error checking URL: {e}")
-        return {
-            "blocked": False,
-            "category": "Error",
-            "risk_level": "Unknown",
-            "method": "error"
-        }
-
-@app.get("/api/dashboard/stats")
-async def get_dashboard_stats() -> DashboardStats:
-    """Endpoint to get dashboard statistics."""
-    try:
+        # Log activity
         db = SessionLocal()
-        now = datetime.utcnow()
+        try:
+            activity = Activity(
+                id=os.urandom(16).hex(),
+                url=url,
+                action="blocked" if result["blocked"] else "allowed",
+                category=result["category"],
+                risk_level=result["risk_level"],
+                ml_scores=result.get("ml_scores", {})
+            )
+            db.add(activity)
+            db.commit()
+        except Exception as db_error:
+            logging.error(f"Database error: {db_error}")
+            db.rollback()
+        finally:
+            db.close()
 
-        # Get counts excluding checking and error actions
-        activities = db.query(Activity).all()
-        total_sites = len({activity.url for activity in activities})  # Unique URLs
-        blocked_sites = len({activity.url for activity in activities if activity.action == "blocked"})
-        allowed_sites = len({activity.url for activity in activities if activity.action == "allowed"})
-        visited_sites = len({activity.url for activity in activities if activity.action == "visited"})
+        return result
 
-        # Get recent activities, excluding checking actions and duplicate URLs within a minute
-        recent = []
-        seen_urls = set()
-        for activity in db.query(Activity).filter(Activity.action != "checking").order_by(Activity.timestamp.desc()).all():
-            # Create a key combining URL and minute timestamp to prevent duplicates within the same minute
-            key = (activity.url, activity.timestamp.replace(second=0, microsecond=0))
-            if key not in seen_urls:
-                recent.append(activity)
-                seen_urls.add(key)
-            if len(recent) >= 10:
-                break
-
-        # Calculate daily stats
-        daily_stats = {}
-        for day_offset in range(7):
-            day = now - timedelta(days=day_offset)
-            day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
-            day_end = day_start + timedelta(days=1)
-            count = db.query(Activity).filter(
-                Activity.timestamp >= day_start,
-                Activity.timestamp < day_end
-            ).count()
-            daily_stats[day_start.strftime("%Y-%m-%d")] = count
-
-        db.close()
-        return DashboardStats(
-            total_sites=total_sites,
-            blocked_sites=blocked_sites,
-            allowed_sites=allowed_sites,
-            visited_sites=visited_sites,
-            recent_activities=[
-                ActivityResponse(
-                    url=a.url,
-                    timestamp=a.timestamp,
-                    action=a.action,
-                    category=a.category,
-                    risk_level=a.risk_level
-                ) for a in recent
-            ],
-            daily_stats=daily_stats,
-            alerts=[
-                {
-                    "id": os.urandom(16).hex(),
-                    "message": f"High risk activity detected: {activity.url}",
-                    "priority": "high",
-                    "timestamp": activity.timestamp.isoformat()
-                } for activity in recent if activity.risk_level and activity.risk_level.lower() == 'high'
-            ] if any(a.risk_level and a.risk_level.lower() == 'high' for a in recent) else []
-        )
     except Exception as e:
-        logging.error(f"Error getting dashboard stats: {e}")
+        logging.error(f"Error checking URL: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/activity")
-async def record_activity(activity: ActivityCreate) -> ActivityResponse:
-    """Endpoint to record browsing activity."""
+async def log_activity(request: Request):
+    form_data = await request.form()
+    url = form_data.get("url", "")
+    action = form_data.get("action", "")
+    category = form_data.get("category", "Unknown")
+    risk_level = form_data.get("risk_level", "Unknown")
+    ml_scores = form_data.get("ml_scores", "{}")
+    """Log browsing activity"""
+    db = SessionLocal()
     try:
-        db = SessionLocal()
-        db_activity = Activity(
+        activity = Activity(
             id=os.urandom(16).hex(),
-            url=activity.url,
-            timestamp=activity.timestamp or datetime.utcnow(),
-            action=activity.action,
-            category=activity.category or get_domain_category(activity.url),
-            risk_level=activity.risk_level
+            url=url,
+            action=action,
+            category=category or "Unknown",
+            risk_level=risk_level or "Unknown",
+            ml_scores=json.loads(ml_scores)
         )
-        db.add(db_activity)
+        db.add(activity)
         db.commit()
-        db.refresh(db_activity)
+        db.refresh(activity)
+        return {
+            "url": activity.url,
+            "timestamp": activity.timestamp,
+            "action": activity.action,
+            "category": activity.category,
+            "risk_level": activity.risk_level,
+            "ml_scores": activity.ml_scores
+        }
+    except Exception as e:
+        logging.error(f"Error logging activity: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
         db.close()
 
-        return ActivityResponse(
-            url=db_activity.url,
-            timestamp=db_activity.timestamp,
-            action=db_activity.action,
-            category=db_activity.category,
-            risk_level=db_activity.risk_level
-        )
+@app.get("/api/activities")
+async def get_activities(limit: int = 100, offset: int = 0):
+    """Get paginated list of activities"""
+    db = SessionLocal()
+    try:
+        activities = db.query(Activity)\
+            .order_by(Activity.timestamp.desc())\
+            .offset(offset)\
+            .limit(limit)\
+            .all()
+
+        return [
+            {
+                "url": activity.url,
+                "timestamp": activity.timestamp.isoformat(),
+                "action": activity.action,
+                "category": activity.category,
+                "risk_level": activity.risk_level,
+                "ml_scores": activity.ml_scores
+            }
+            for activity in activities
+        ]
     except Exception as e:
-        logging.error(f"Error recording activity: {e}")
+        logging.error(f"Error getting activities: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 
 @app.get("/api/alerts")
-async def get_alerts() -> List[ActivityResponse]:
-    """Endpoint to get alerts (blocked and high-risk activities)."""
+async def get_alerts():
+    """Get recent alerts"""
+    db = SessionLocal()
     try:
-        db = SessionLocal()
-        activities = db.query(Activity).filter(
-            (Activity.action == "blocked") |
-            (Activity.risk_level.ilike("high"))
-        ).order_by(Activity.timestamp.desc()).all()
+        # Get activities with high risk or blocked status from last 24 hours
+        yesterday = datetime.utcnow() - timedelta(days=1)
+        alerts = db.query(Activity)\
+            .filter(
+                (Activity.risk_level == "High") | 
+                (Activity.action == "blocked")
+            )\
+            .filter(Activity.timestamp > yesterday)\
+            .order_by(Activity.timestamp.desc())\
+            .all()
 
-        db.close()
         return [
-            ActivityResponse(
-                url=activity.url,
-                timestamp=activity.timestamp,
-                action=activity.action,
-                category=activity.category,
-                risk_level=activity.risk_level
-            ) for activity in activities
+            {
+                "url": alert.url,
+                "timestamp": alert.timestamp.isoformat(),
+                "action": alert.action,
+                "category": alert.category,
+                "risk_level": alert.risk_level,
+                "ml_scores": alert.ml_scores
+            }
+            for alert in alerts
         ]
     except Exception as e:
         logging.error(f"Error getting alerts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/activities")
-async def get_recent_activities() -> List[ActivityResponse]:
-    """Endpoint to get recent activities."""
-    try:
-        db = SessionLocal()
-        activities = db.query(Activity).order_by(Activity.timestamp.desc()).all()
-
+    finally:
         db.close()
-        return [
-            ActivityResponse(
-                url=activity.url,
-                timestamp=activity.timestamp,
-                action=activity.action,
-                category=activity.category,
-                risk_level=activity.risk_level
-            ) for activity in activities
-        ]
-    except Exception as e:
-        logging.error(f"Error getting recent activities: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/retrain")
-async def retrain() -> Dict[str, str]:
-    """Endpoint to retrain the ML model."""
-    global ml_model
-    try:
-        logging.info("Starting model retraining...")
-        ml_model = train()
-        return {"status": "success", "message": "Model retrained successfully"}
-    except Exception as e:
-        logging.error(f"Error during retraining: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

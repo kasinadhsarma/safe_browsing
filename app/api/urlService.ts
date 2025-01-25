@@ -31,6 +31,7 @@ export interface DashboardStats {
   daily_stats: { [key: string]: number };
   protection_stats: ProtectionStats;
   alerts: Alert[];
+  ml_model_updates: { id: string; message: string; priority: 'high' | 'medium' | 'low' }[];
 }
 
 class ApiError extends Error {
@@ -80,7 +81,7 @@ export const urlService = {
   },
 
   async getDashboardStats(): Promise<DashboardStats> {
-    const response = await fetch(`${API_BASE_URL}/dashboard/stats`, {
+    const response = await fetch(`${API_BASE_URL}/stats`, {
       headers: {
         'Accept': 'application/json'
       }
@@ -93,14 +94,19 @@ export const urlService = {
     url: string;
     action: string;
     category?: string;
-    timestamp?: string;
+    risk_level?: string;
+    ml_scores?: string;
   }): Promise<Activity> {
+    const formData = new FormData();
+    formData.append('url', activity.url);
+    formData.append('action', activity.action);
+    formData.append('category', activity.category || 'Unknown');
+    formData.append('risk_level', activity.risk_level || 'Unknown');
+    formData.append('ml_scores', activity.ml_scores || '{}');
+
     const response = await fetch(`${API_BASE_URL}/activity`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(activity),
+      body: formData
     });
 
     return handleResponse(response);
@@ -164,7 +170,7 @@ export const urlService = {
 // Export a helper for checking extension connectivity
 export async function checkBackendConnectivity(): Promise<boolean> {
   try {
-    const response = await fetch(`${API_BASE_URL}/dashboard/stats`, {
+    const response = await fetch(`${API_BASE_URL}/stats`, {
       method: 'GET',
       headers: { 'Accept': 'application/json' }
     });
