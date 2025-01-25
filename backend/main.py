@@ -15,19 +15,17 @@ Key Features:
 from fastapi import FastAPI, HTTPException, Form, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-import torch
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ml.ai.training import train_models, predict_url
 from ml.ai.dataset import extract_url_features, generate_dataset
-from ml.ai.image_classification import ImageClassifier
 import os
 import logging
 import re
 import json
 import traceback
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timedelta
 from sqlalchemy import (
     create_engine, Column, String, DateTime, Text, select,
@@ -61,7 +59,6 @@ Base = declarative_base()
 
 # Global ML models
 url_model: Optional[Dict] = None
-image_model: Optional[ImageClassifier] = None
 
 # Database Models
 class Activity(Base):
@@ -69,10 +66,12 @@ class Activity(Base):
     id = Column(String, primary_key=True)
     url = Column(String)
     timestamp = Column(DateTime, default=datetime.utcnow)
-    action = Column(String)  # blocked, allowed, override
+    action = Column(String)  # blocked, allowed, override, warning
     category = Column(String)
     risk_level = Column(String)
     ml_scores = Column(JSON, nullable=True)  # Store detailed ML predictions
+    age_group = Column(String)  # kid, teen, adult
+    block_reason = Column(String, nullable=True)  # Reason for blocking
 
 class Setting(Base):
     __tablename__ = "settings"
@@ -129,7 +128,7 @@ app.add_middleware(
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
     global url_model, image_model
-    
+
     try:
         # Train models
         logging.info("Training URL classification models...")
@@ -138,9 +137,9 @@ async def lifespan(app: FastAPI):
             logging.info("URL classification models loaded successfully")
         else:
             logging.warning("URL models not loaded")
-            
+
         yield
-        
+
     except Exception as e:
         logging.error(f"Startup error: {e}")
         raise
@@ -191,7 +190,9 @@ async def get_stats():
                     "action": a.action,
                     "category": a.category,
                     "risk_level": a.risk_level,
-                    "ml_scores": a.ml_scores
+                    "ml_scores": a.ml_scores,
+                    "age_group": a.age_group,
+                    "block_reason": a.block_reason
                 } for a in activities
             ],
             "ml_metrics": ml_metrics,
@@ -207,20 +208,72 @@ class URLCheckRequest(BaseModel):
     url: str
     age_group: str = "kid"  # Default to most restrictive setting
 
+def determine_risk_level(predictions: dict, age_group: str) -> Tuple[str, bool, str]:
+    """Determine risk level and blocking decision based on predictions and age group"""
+    # Get ML scores with defaults
+    default_scores = {"knn": 0.0, "svm": 0.0, "nb": 0.0}
+    ml_scores = predictions.get("ml_scores", default_scores)
+
+    # Use only valid scores (ignore None, -Infinity, etc)
+    valid_scores = [score for score in ml_scores.values() if isinstance(score, (int, float)) and score >= 0]
+    risk_score = max(valid_scores) if valid_scores else 0.0
+
+    # Risk thresholds based on age group
+    thresholds = {
+        "kid": {"high": 0.7, "medium": 0.4},
+        "teen": {"high": 0.8, "medium": 0.6},
+        "adult": {"high": 0.9, "medium": 0.7}
+    }
+
+    current_threshold = thresholds.get(age_group, thresholds["kid"])
+
+    if risk_score >= current_threshold["high"]:
+        return "High", True, f"High risk content detected (score: {risk_score:.2f})"
+    elif risk_score >= current_threshold["medium"]:
+        return "Medium", age_group == "kid", f"Medium risk content (score: {risk_score:.2f})"
+    else:
+        return "Low", False, ""
+
 @app.post("/api/check-url")
 async def check_url(url: str = Form(...), age_group: str = Form("kid")):
-    """Check if a URL should be blocked"""
+    """Check if a URL should be blocked based on ML predictions and age group"""
     try:
         # Extract features
         features = extract_url_features(url)
         if not features:
-            result = {
-                "blocked": False,
-                "risk_level": "Unknown",
-                "category": "Unknown",
-                "probability": 0.0,
-                "predictions": {}
-            }
+            # Handle internal URLs
+            if url.startswith('http://localhost:') or url.startswith('https://localhost:'):
+                result = {
+                    "blocked": False,
+                    "risk_level": "Low",
+                    "category": "Internal",
+                    "probability": 0.0,
+                    "predictions": {
+                        "model_predictions": {
+                            "knn": 0.0,
+                            "svm": 0.0,
+                            "nb": 0.0
+                        }
+                    },
+                    "ml_scores": {
+                        "knn": 0.0,
+                        "svm": 0.0,
+                        "nb": 0.0
+                    }
+                }
+            else:
+                result = {
+                    "blocked": False,
+                    "risk_level": "Unknown",
+                    "category": "Unknown",
+                    "probability": 0.0,
+                    "predictions": {},
+                    "ml_scores": {
+                        "knn": 0.0,
+                        "svm": 0.0,
+                        "nb": 0.0
+                    }
+                }
         else:
             # Make prediction with age-based risk assessment
             if url_model:
@@ -230,22 +283,18 @@ async def check_url(url: str = Form(...), age_group: str = Form("kid")):
                     models_dir='ml/ai/models/',
                     age_group=age_group
                 )
-                
+
                 result = {
                     "blocked": is_blocked,
-                    "risk_level": predictions["risk_level"],
-                    "risk_score": float(risk_score),
-                    "age_group": age_group,
+                    "probability": float(risk_score),
+                    "risk_level": predictions.get("risk_level", "Unknown"),
                     "category": predictions.get("category", "Unknown"),
+                    "url": url,
                     "predictions": predictions["model_predictions"],
-                    "unsafe_content": {
-                        "kid_unsafe": predictions.get("kid_unsafe_words", 0),
-                        "teen_unsafe": predictions.get("teen_unsafe_words", 0)
-                    },
-                    "security_flags": {
-                        "suspicious_tld": features.get("suspicious_tld", 0),
-                        "is_ip_address": features.get("is_ip_address", 0),
-                        "has_https": features.get("has_https", 1)
+                    "ml_scores": {
+                        "knn": predictions["model_predictions"].get("knn", 0.0),
+                        "svm": predictions["model_predictions"].get("svm", 0.0),
+                        "nb": predictions["model_predictions"].get("nb", 0.0)
                     }
                 }
             else:
@@ -265,13 +314,24 @@ async def check_url(url: str = Form(...), age_group: str = Form("kid")):
         # Log activity
         db = SessionLocal()
         try:
+            # Determine risk level and blocking decision
+            risk_level, should_block, block_reason = determine_risk_level(result, age_group)
+
+            # Update result with new risk assessment
+            result["blocked"] = should_block
+            result["risk_level"] = risk_level
+            result["block_reason"] = block_reason if should_block else ""
+
             activity = Activity(
                 id=os.urandom(16).hex(),
-                url=url,
-                action="blocked" if result["blocked"] else "allowed",
-                category=result["category"],
-                risk_level=result["risk_level"],
-                ml_scores=result.get("ml_scores", {})
+                url=url.strip(),  # Remove any whitespace
+                action="blocked" if should_block else "allowed",
+                category=result.get("category", "Internal"),
+                risk_level=risk_level,
+                ml_scores={k: v for k, v in result.get("ml_scores", {}).items()
+                          if isinstance(v, (int, float)) and v >= 0},  # Filter valid scores
+                age_group=age_group.strip(),
+                block_reason=block_reason if should_block else None
             )
             db.add(activity)
             db.commit()
@@ -281,7 +341,14 @@ async def check_url(url: str = Form(...), age_group: str = Form("kid")):
         finally:
             db.close()
 
-        return result
+        return {
+            **result,
+            "ml_scores": result.get("ml_scores", {
+                "knn": 0.0,
+                "svm": 0.0,
+                "nb": 0.0
+            })
+        }
 
     except Exception as e:
         logging.error(f"Error checking URL: {str(e)}")
@@ -298,13 +365,22 @@ async def log_activity(request: Request):
     """Log browsing activity"""
     db = SessionLocal()
     try:
+        # Parse and validate ML scores
+        try:
+            ml_scores_dict = json.loads(ml_scores)
+            valid_scores = {k: v for k, v in ml_scores_dict.items()
+                          if isinstance(v, (int, float)) and v >= 0}
+        except json.JSONDecodeError:
+            valid_scores = {}
+
         activity = Activity(
             id=os.urandom(16).hex(),
-            url=url,
-            action=action,
-            category=category or "Unknown",
-            risk_level=risk_level or "Unknown",
-            ml_scores=json.loads(ml_scores)
+            url=url.strip(),
+            action=action.strip(),
+            category=category.strip() or "Unknown",
+            risk_level=risk_level.strip() or "Unknown",
+            ml_scores=valid_scores,
+            age_group=form_data.get("age_group", "kid").strip()
         )
         db.add(activity)
         db.commit()
@@ -315,7 +391,9 @@ async def log_activity(request: Request):
             "action": activity.action,
             "category": activity.category,
             "risk_level": activity.risk_level,
-            "ml_scores": activity.ml_scores
+            "ml_scores": activity.ml_scores,
+            "age_group": activity.age_group,
+            "block_reason": activity.block_reason
         }
     except Exception as e:
         logging.error(f"Error logging activity: {e}")
@@ -341,7 +419,9 @@ async def get_activities(limit: int = 100, offset: int = 0):
                 "action": activity.action,
                 "category": activity.category,
                 "risk_level": activity.risk_level,
-                "ml_scores": activity.ml_scores
+                "ml_scores": activity.ml_scores,
+                "age_group": activity.age_group,
+                "block_reason": activity.block_reason
             }
             for activity in activities
         ]
@@ -360,7 +440,7 @@ async def get_alerts():
         yesterday = datetime.utcnow() - timedelta(days=1)
         alerts = db.query(Activity)\
             .filter(
-                (Activity.risk_level == "High") | 
+                (Activity.risk_level == "High") |
                 (Activity.action == "blocked")
             )\
             .filter(Activity.timestamp > yesterday)\
@@ -374,7 +454,9 @@ async def get_alerts():
                 "action": alert.action,
                 "category": alert.category,
                 "risk_level": alert.risk_level,
-                "ml_scores": alert.ml_scores
+                "ml_scores": alert.ml_scores,
+                "age_group": alert.age_group,
+                "block_reason": alert.block_reason
             }
             for alert in alerts
         ]
@@ -398,7 +480,7 @@ if __name__ == "__main__":
 
     try:
         logging.info("Initializing server...")
-        
+
         # Try ports from 8000 to 8010
         port = 8000
         while port < 8010:

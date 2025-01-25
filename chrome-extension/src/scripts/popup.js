@@ -9,6 +9,7 @@ class PopupManager {
         this.riskLevel = document.getElementById('risk-level');
         this.dashboardBtn = document.getElementById('dashboard-btn');
         this.settingsBtn = document.getElementById('settings-btn');
+        this.ageGroupSelect = document.getElementById('age-group-select');
 
         this.initializeListeners();
         this.loadStats();
@@ -22,10 +23,15 @@ class PopupManager {
         });
 
         // Initial settings check
-        chrome.storage.sync.get(['blockingEnabled'], (result) => {
+        chrome.storage.sync.get(['blockingEnabled', 'ageGroup'], (result) => {
             const enabled = result.blockingEnabled ?? true;
             this.protectionToggle.checked = enabled;
             this.updateStatus(enabled ? 'Protected' : 'Protection Disabled', enabled);
+            
+            // Set age group
+            if (this.ageGroupSelect) {
+                this.ageGroupSelect.value = result.ageGroup || 'kid';
+            }
         });
     }
 
@@ -43,6 +49,20 @@ class PopupManager {
         this.dashboardBtn.addEventListener('click', () => {
             chrome.tabs.create({ url: 'http://localhost:3000/dashboard' });
         });
+
+        // Age group selector
+        if (this.ageGroupSelect) {
+            this.ageGroupSelect.addEventListener('change', (e) => {
+                const ageGroup = e.target.value;
+                chrome.storage.sync.set({ ageGroup }, () => {
+                    console.log('Age group updated:', ageGroup);
+                    // Recheck current page with new age group
+                    if (this.protectionToggle.checked) {
+                        this.checkCurrentPage();
+                    }
+                });
+            });
+        }
 
         // Settings button
         this.settingsBtn.addEventListener('click', () => {
@@ -87,8 +107,12 @@ class PopupManager {
             if (!tab?.url) return;
 
             // Prepare form data
+            // Get current age group
+            const { ageGroup } = await chrome.storage.sync.get(['ageGroup']);
+            
             const formData = new FormData();
             formData.append('url', tab.url);
+            formData.append('age_group', ageGroup || 'kid');
 
             // Check URL
             const response = await fetch('http://localhost:8000/api/check-url', {
@@ -106,18 +130,18 @@ class PopupManager {
                 !result.blocked
             );
 
-            // Add details if available
-            if (result.category || result.risk_level) {
-                const details = document.createElement('div');
-                details.style.fontSize = '12px';
-                details.style.marginTop = '4px';
-                details.innerHTML = `
-                    ${result.category ? `Category: ${result.category}<br>` : ''}
-                    ${result.risk_level ? `Risk Level: ${result.risk_level}<br>` : ''}
-                    ${result.probability ? `Confidence: ${(result.probability * 100).toFixed(1)}%` : ''}
-                `;
-                this.statusValue.appendChild(details);
-            }
+            // Always show details with default values
+            const details = document.createElement('div');
+            details.style.fontSize = '12px';
+            details.style.marginTop = '4px';
+            details.innerHTML = `
+                Category: ${result.category || 'Unknown'}<br>
+                Risk Level: ${result.risk_level || 'Unknown'}<br>
+                ${result.probability ? `Confidence: ${(result.probability * 100).toFixed(1)}%` : ''}<br>
+                Age Group: ${result.age_group || 'Kid'}<br>
+                ${result.block_reason ? `Block Reason: ${result.block_reason}` : ''}
+            `;
+            this.statusValue.appendChild(details);
 
         } catch (error) {
             console.error('Error checking current page:', error);

@@ -77,7 +77,8 @@ const fetchActivities = async () => {
     switch (risk_level?.toLowerCase()) {
       case 'high': return 'destructive';
       case 'medium': return 'secondary';
-      default: return 'default';
+      case 'unknown': return 'outline';
+      default: return 'outline';
     }
   };
 
@@ -135,6 +136,9 @@ const fetchActivities = async () => {
                   <TableHead>Action</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Risk Level</TableHead>
+                  <TableHead>Age Group</TableHead>
+                  <TableHead>Block Reason</TableHead>
+                  <TableHead>ML Score</TableHead>
                   <TableHead>Time</TableHead>
                 </TableRow>
               </TableHeader>
@@ -168,6 +172,24 @@ const fetchActivities = async () => {
                         </Badge>
                       </TableCell>
                       <TableCell>
+                        <Badge variant="secondary">
+                          {activity.age_group || 'N/A'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="max-w-xs truncate">
+                        {activity.block_reason || '-'}
+                      </TableCell>
+                      <TableCell>
+                        {activity.ml_scores && Object.keys(activity.ml_scores).length > 0 ? 
+                          (() => {
+                            const scores = Object.values(activity.ml_scores)
+                              .filter(v => typeof v === 'number' && v >= 0);
+                            return scores.length > 0 ? 
+                              `${(Math.max(...scores) * 100).toFixed(1)}%` : 'N/A';
+                          })()
+                          : 'N/A'}
+                      </TableCell>
+                      <TableCell>
                         {(() => {
                           try {
                             return new Date(activity.timestamp).toLocaleString('en-US', {
@@ -186,7 +208,7 @@ const fetchActivities = async () => {
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                       No activities found
                     </TableCell>
                   </TableRow>

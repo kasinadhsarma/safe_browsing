@@ -36,9 +36,19 @@ class SafeBrowsingChecker {
                 return urlCache.get(url);
             }
 
+            // Get user settings
+            const settings = await new Promise(resolve => {
+                chrome.storage.sync.get(['ageGroup'], (result) => {
+                    resolve({
+                        ageGroup: result.ageGroup || 'kid' // Default to most restrictive
+                    });
+                });
+            });
+
             // Prepare form data
             const formData = new FormData();
             formData.append('url', url);
+            formData.append('age_group', settings.ageGroup);
 
             // Make API request
             const response = await fetch(CHECK_URL_ENDPOINT, {
@@ -128,43 +138,88 @@ class SafeBrowsingChecker {
                     left: 0;
                     width: 100%;
                     height: 100%;
-                    background-color: rgba(0, 0, 0, 0.7);
-                    z-index: 2147483647; /* Maximum z-index */
+                    background-color: rgba(0, 0, 0, 0.85);
+                    z-index: 2147483647;
                     display: flex;
                     justify-content: center;
                     align-items: center;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
                 }
                 .content {
                     background-color: white;
-                    padding: 20px;
-                    border-radius: 8px;
+                    padding: 30px;
+                    border-radius: 12px;
                     text-align: center;
+                    max-width: 500px;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
                 }
                 h2 {
                     color: #d32f2f;
-                    margin: 0 0 16px;
+                    margin: 0 0 20px;
+                    font-size: 24px;
+                }
+                .risk-badge {
+                    display: inline-block;
+                    padding: 4px 12px;
+                    border-radius: 16px;
+                    font-weight: bold;
+                    margin-bottom: 16px;
+                }
+                .risk-high {
+                    background-color: #ffebee;
+                    color: #d32f2f;
+                }
+                .risk-medium {
+                    background-color: #fff3e0;
+                    color: #ef6c00;
+                }
+                .info {
+                    margin: 16px 0;
+                    padding: 16px;
+                    background-color: #f5f5f5;
+                    border-radius: 8px;
+                    text-align: left;
+                }
+                .reason {
+                    color: #d32f2f;
+                    font-weight: 500;
+                    margin-bottom: 12px;
                 }
                 p {
-                    margin: 0 0 16px;
+                    margin: 8px 0;
+                    line-height: 1.5;
+                    color: #333;
                 }
                 button {
-                    padding: 8px 16px;
+                    padding: 10px 20px;
                     border: none;
-                    border-radius: 4px;
+                    border-radius: 6px;
                     background-color: #d32f2f;
                     color: white;
                     cursor: pointer;
+                    font-size: 16px;
+                    transition: background-color 0.2s;
+                    margin-top: 16px;
+                }
+                button:hover {
+                    background-color: #b71c1c;
+                }
+                .category {
+                    font-weight: 500;
+                    color: #666;
                 }
             </style>
             <div id="safe-browsing-overlay">
                 <div class="content">
                     <h2>Access Blocked</h2>
-                    <p>
-                        This website has been blocked for your safety.<br>
-                        Category: ${result.category}<br>
-                        Risk Level: ${result.risk_level}<br>
-                        ${result.suspicious_features ? `Suspicious Features: ${Object.keys(result.suspicious_features).join(', ')}` : ''}
-                    </p>
+                    <div class="risk-badge risk-${result.risk_level?.toLowerCase()}">
+                        Risk Level: ${result.risk_level || 'Unknown'}
+                    </div>
+                    <div class="info">
+                        ${result.block_reason ? `<div class="reason">${result.block_reason}</div>` : ''}
+                        <p class="category">Category: ${result.category || 'Unknown'}</p>
+                        ${result.predictions ? `<p>ML Confidence: ${(result.probability * 100).toFixed(1)}%</p>` : ''}
+                    </div>
                     <button id="continue-btn">Continue Anyway</button>
                 </div>
             </div>

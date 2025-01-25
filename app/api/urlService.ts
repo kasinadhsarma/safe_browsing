@@ -3,9 +3,12 @@ const API_BASE_URL = "http://localhost:8000/api";
 export interface Activity {
   url: string;
   timestamp: string;
-  action: 'blocked' | 'allowed' | 'visited' | 'checking' | 'error';
-  category?: string;
-  risk_level?: string;
+  action: 'blocked' | 'allowed' | 'visited' | 'checking' | 'error' | 'override';
+  category: string;
+  risk_level: string;
+  age_group?: string;
+  block_reason?: string;
+  ml_scores?: { [key: string]: number };
 }
 
 export interface Alert {
@@ -93,16 +96,20 @@ export const urlService = {
   async recordActivity(activity: {
     url: string;
     action: string;
-    category?: string;
-    risk_level?: string;
-    ml_scores?: string;
+    category: string;
+    risk_level: string;
+    age_group?: string;
+    block_reason?: string;
+    ml_scores?: { [key: string]: number };
   }): Promise<Activity> {
     const formData = new FormData();
     formData.append('url', activity.url);
     formData.append('action', activity.action);
-    formData.append('category', activity.category || '');  // Don't set default here
-    formData.append('risk_level', activity.risk_level || '');  // Don't set default here
-    formData.append('ml_scores', activity.ml_scores || '{}');
+    formData.append('category', activity.category);
+    formData.append('risk_level', activity.risk_level);
+    if (activity.age_group) formData.append('age_group', activity.age_group);
+    if (activity.block_reason) formData.append('block_reason', activity.block_reason);
+    formData.append('ml_scores', JSON.stringify(activity.ml_scores || {}));
 
     const response = await fetch(`${API_BASE_URL}/activity`, {
       method: 'POST',

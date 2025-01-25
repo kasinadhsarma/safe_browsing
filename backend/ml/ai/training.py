@@ -328,37 +328,77 @@ def predict_url(url, threshold=0.65, models_dir=None, age_group='kid'):
         # Determine category based on features and predictions
         domain = urlparse(url).netloc.lower()
         
+        # Convert URL to lowercase for comparison
+        url_lower = url.lower()
+        
+        # Special case for localhost URLs
+        if domain.startswith('localhost'):
+            # Check path for category hints
+            if '/dashboard' in url_lower:
+                determined_category = 'Dashboard'
+            else:
+                determined_category = 'Local'
+            result['category'] = determined_category
+            result['risk_level'] = 'Low'  # Local URLs are generally safe
+            return result['is_unsafe'], result['risk_score'], result
+
+
         # Initialize category mapping with more comprehensive patterns
         categories = {
             'education': ['edu', 'school', 'university', 'learn', 'course', 'tutorial', 'study'],
             'entertainment': ['youtube.com', 'netflix.com', 'games', 'music', 'movie', 'video', 'stream'],
-            'social': ['facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com', 'social', '/notifications', '/feed', '/posts'],
+            'social': ['facebook.com', 'twitter.com', 'instagram.com', 'social', '/notifications', '/feed', '/posts'],
             'news': ['news', 'bbc.com', 'cnn.com', 'reuters.com', 'article', 'blog'],
             'shopping': ['amazon.com', 'ebay.com', 'shop', 'store', 'cart', 'checkout', 'product'],
             'adult': ['adult', 'xxx', 'porn', 'nsfw'],
             'gambling': ['casino', 'bet', 'poker', 'gambling', 'lottery'],
             'malware': ['malware', 'virus', 'hack', 'trojan', 'worm'],
-            'professional': ['linkedin.com', 'indeed.com', 'glassdoor.com', 'jobs', 'career', 'resume']
+            'professional': ['linkedin', 'indeed', 'glassdoor', 'jobs', 'career', 'resume']
         }
+
+        # Special case for LinkedIn
+        if 'linkedin.com' in domain:
+            result['category'] = 'Professional'
+            result['risk_level'] = 'Low'  # LinkedIn is a trusted platform
+            return result['is_unsafe'], result['risk_score'], result
         
-        # Determine category based on URL and features with enhanced logic
+        # Determine category with confidence threshold
         determined_category = 'Unknown'
         url_lower = url.lower()
+        max_confidence = 0.0
+        best_category = 'Unknown'
         
-        # First check full domain matches
+        # Calculate confidence scores for each category
+        category_scores = {}
         for category, keywords in categories.items():
-            if any(keyword in domain for keyword in keywords):
-                determined_category = category.capitalize()
-                break
+            score = sum(keyword in url_lower for keyword in keywords)
+            category_scores[category] = score
+            if score > max_confidence:
+                max_confidence = score
+                best_category = category.capitalize()
         
-        # If still unknown, check URL path for additional context
-        if determined_category == 'Unknown':
-            for category, keywords in categories.items():
-                if any(keyword in url_lower for keyword in keywords):
-                    determined_category = category.capitalize()
-                    break
-                
+        # Only assign category if confidence is above threshold
+        confidence_threshold = 2  # At least 2 strong matches
+        if max_confidence >= confidence_threshold:
+            determined_category = best_category
+        else:
+            # For low confidence, use domain-based fallback
+            domain_parts = domain.split('.')
+            if len(domain_parts) > 1:
+                tld = domain_parts[-1]
+                if tld in ['edu', 'gov']:
+                    determined_category = 'Education' if tld == 'edu' else 'Government'
+                elif tld in ['org', 'net']:
+                    determined_category = 'Organization'
+                else:
+                    determined_category = 'General'
+        
         result['category'] = determined_category
+        
+        # Adjust risk level for unknown categories
+        if determined_category == 'Unknown':
+            result['risk_level'] = 'Medium'  # Default to medium risk for unknown
+            result['risk_score'] = min(result['risk_score'] * 1.2, 1.0)  # Slightly increase risk
         
         return result['is_unsafe'], result['risk_score'], result
 
