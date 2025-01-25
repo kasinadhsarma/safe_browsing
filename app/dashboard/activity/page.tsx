@@ -28,11 +28,24 @@ const fetchActivities = async () => {
     const data = await urlService.getRecentActivities();
     console.log('Activities fetched:', data);
     console.log('Activities length:', data.length);
-    setActivities(data.map(activity => ({
-      ...activity,
-      timestamp: activity.timestamp || new Date().toISOString(),
-      url: activity.url || 'N/A'
-    })).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+    setActivities(data.map(activity => {
+      // Ensure valid timestamp
+      let timestamp = activity.timestamp;
+      try {
+        // Test if timestamp is valid
+        new Date(timestamp).toISOString();
+      } catch {
+        timestamp = new Date().toISOString();
+      }
+      
+      return {
+        ...activity,
+        timestamp,
+        url: activity.url || 'N/A',
+        category: activity.category || 'Unknown',
+        risk_level: activity.risk_level || 'Unknown'
+      };
+    }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
   } catch (error) {
     console.error('Error fetching activities:', error);
     setError('Failed to fetch activities. Please try again.');
@@ -155,13 +168,19 @@ const fetchActivities = async () => {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {new Date(activity.timestamp).toLocaleString('en-US', {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
+                        {(() => {
+                          try {
+                            return new Date(activity.timestamp).toLocaleString('en-US', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            });
+                          } catch {
+                            return 'Invalid Date';
+                          }
+                        })()}
                       </TableCell>
                     </TableRow>
                   ))

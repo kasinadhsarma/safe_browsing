@@ -236,7 +236,7 @@ async def check_url(url: str = Form(...), age_group: str = Form("kid")):
                     "risk_level": predictions["risk_level"],
                     "risk_score": float(risk_score),
                     "age_group": age_group,
-                    "category": "Malicious" if is_blocked else "Safe",
+                    "category": predictions.get("category", "Unknown"),
                     "predictions": predictions["model_predictions"],
                     "unsafe_content": {
                         "kid_unsafe": predictions.get("kid_unsafe_words", 0),

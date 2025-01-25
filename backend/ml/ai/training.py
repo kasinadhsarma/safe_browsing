@@ -325,7 +325,42 @@ def predict_url(url, threshold=0.65, models_dir=None, age_group='kid'):
         plt.ylabel('Risk Score')
         plt.show()
 
-        return result['is_unsafe'], result['risk_score'], result['risk_score']
+        # Determine category based on features and predictions
+        domain = urlparse(url).netloc.lower()
+        
+        # Initialize category mapping with more comprehensive patterns
+        categories = {
+            'education': ['edu', 'school', 'university', 'learn', 'course', 'tutorial', 'study'],
+            'entertainment': ['youtube.com', 'netflix.com', 'games', 'music', 'movie', 'video', 'stream'],
+            'social': ['facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com', 'social', '/notifications', '/feed', '/posts'],
+            'news': ['news', 'bbc.com', 'cnn.com', 'reuters.com', 'article', 'blog'],
+            'shopping': ['amazon.com', 'ebay.com', 'shop', 'store', 'cart', 'checkout', 'product'],
+            'adult': ['adult', 'xxx', 'porn', 'nsfw'],
+            'gambling': ['casino', 'bet', 'poker', 'gambling', 'lottery'],
+            'malware': ['malware', 'virus', 'hack', 'trojan', 'worm'],
+            'professional': ['linkedin.com', 'indeed.com', 'glassdoor.com', 'jobs', 'career', 'resume']
+        }
+        
+        # Determine category based on URL and features with enhanced logic
+        determined_category = 'Unknown'
+        url_lower = url.lower()
+        
+        # First check full domain matches
+        for category, keywords in categories.items():
+            if any(keyword in domain for keyword in keywords):
+                determined_category = category.capitalize()
+                break
+        
+        # If still unknown, check URL path for additional context
+        if determined_category == 'Unknown':
+            for category, keywords in categories.items():
+                if any(keyword in url_lower for keyword in keywords):
+                    determined_category = category.capitalize()
+                    break
+                
+        result['category'] = determined_category
+        
+        return result['is_unsafe'], result['risk_score'], result
 
     except Exception as e:
         logging.error(f"Error during ensemble prediction: {e}")

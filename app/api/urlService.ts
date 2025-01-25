@@ -100,8 +100,8 @@ export const urlService = {
     const formData = new FormData();
     formData.append('url', activity.url);
     formData.append('action', activity.action);
-    formData.append('category', activity.category || 'Unknown');
-    formData.append('risk_level', activity.risk_level || 'Unknown');
+    formData.append('category', activity.category || '');  // Don't set default here
+    formData.append('risk_level', activity.risk_level || '');  // Don't set default here
     formData.append('ml_scores', activity.ml_scores || '{}');
 
     const response = await fetch(`${API_BASE_URL}/activity`, {
