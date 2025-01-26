@@ -45,7 +45,8 @@ const fetchActivities = async () => {
         category: activity.category || 'Unknown',
         risk_level: activity.risk_level || 'Unknown',
         age_group: activity.age_group || 'N/A',
-        block_reason: activity.block_reason || '-'
+        block_reason: activity.block_reason || '-',
+        ml_scores: activity.ml_scores || {}
       };
     }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
   } catch (error) {
