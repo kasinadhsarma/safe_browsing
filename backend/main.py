@@ -17,13 +17,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from ml.ai.training import train_models, predict_url
-from ml.ai.dataset import extract_url_features, generate_dataset
-import os
+import time
+import json
 import logging
 import re
-import json
 import traceback
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timedelta
@@ -34,7 +31,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from pydantic import BaseModel, ConfigDict
 import tempfile
-
+from ml.ai.training import train_models, predict_url
+from ml.ai.dataset import extract_url_features
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -127,7 +125,7 @@ app.add_middleware(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
-    global url_model, image_model
+    global url_model
 
     try:
         # Train models
@@ -148,6 +146,34 @@ async def lifespan(app: FastAPI):
 
 app.lifespan = lifespan
 
+# Utility Functions
+def determine_risk_level(predictions: dict, age_group: str) -> Tuple[str, bool, str]:
+    """Determine risk level and blocking decision based on predictions and age group"""
+    # Get ML scores with defaults
+    default_scores = {"knn": 0.0, "svm": 0.0, "nb": 0.0}
+    ml_scores = predictions.get("ml_scores", default_scores)
+
+    # Use only valid scores (ignore None, -Infinity, etc)
+    valid_scores = [score for score in ml_scores.values() if isinstance(score, (int, float)) and score >= 0]
+    risk_score = max(valid_scores) if valid_scores else 0.0
+
+    # Risk thresholds based on age group
+    thresholds = {
+        "kid": {"high": 0.7, "medium": 0.4},
+        "teen": {"high": 0.8, "medium": 0.6},
+        "adult": {"high": 0.9, "medium": 0.7}
+    }
+
+    current_threshold = thresholds.get(age_group, thresholds["kid"])
+
+    if risk_score >= current_threshold["high"]:
+        return "High", True, f"High risk content detected (score: {risk_score:.2f})"
+    elif risk_score >= current_threshold["medium"]:
+        return "Medium", age_group == "kid", f"Medium risk content (score: {risk_score:.2f})"
+    else:
+        return "Low", False, ""
+
+# API Endpoints
 @app.get("/api/stats")
 async def get_stats():
     """Get dashboard statistics"""
@@ -203,36 +229,6 @@ async def get_stats():
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
-
-class URLCheckRequest(BaseModel):
-    url: str
-    age_group: str = "kid"  # Default to most restrictive setting
-
-def determine_risk_level(predictions: dict, age_group: str) -> Tuple[str, bool, str]:
-    """Determine risk level and blocking decision based on predictions and age group"""
-    # Get ML scores with defaults
-    default_scores = {"knn": 0.0, "svm": 0.0, "nb": 0.0}
-    ml_scores = predictions.get("ml_scores", default_scores)
-
-    # Use only valid scores (ignore None, -Infinity, etc)
-    valid_scores = [score for score in ml_scores.values() if isinstance(score, (int, float)) and score >= 0]
-    risk_score = max(valid_scores) if valid_scores else 0.0
-
-    # Risk thresholds based on age group
-    thresholds = {
-        "kid": {"high": 0.7, "medium": 0.4},
-        "teen": {"high": 0.8, "medium": 0.6},
-        "adult": {"high": 0.9, "medium": 0.7}
-    }
-
-    current_threshold = thresholds.get(age_group, thresholds["kid"])
-
-    if risk_score >= current_threshold["high"]:
-        return "High", True, f"High risk content detected (score: {risk_score:.2f})"
-    elif risk_score >= current_threshold["medium"]:
-        return "Medium", age_group == "kid", f"Medium risk content (score: {risk_score:.2f})"
-    else:
-        return "Low", False, ""
 
 @app.post("/api/check-url")
 async def check_url(url: str = Form(...), age_group: str = Form("kid")):
@@ -363,6 +359,8 @@ async def log_activity(request: Request):
     risk_level = form_data.get("risk_level", "Unknown")
     ml_scores = form_data.get("ml_scores", "{}")
     block_reason = form_data.get("block_reason", None)
+    age_group = form_data.get("age_group", "kid")
+
     """Log browsing activity"""
     db = SessionLocal()
     try:
@@ -381,7 +379,7 @@ async def log_activity(request: Request):
             category=category.strip() or "Unknown",
             risk_level=risk_level.strip() or "Unknown",
             ml_scores=valid_scores,
-            age_group=form_data.get("age_group", "kid").strip(),
+            age_group=age_group.strip(),
             block_reason=block_reason.strip() if block_reason else None
         )
         db.add(activity)

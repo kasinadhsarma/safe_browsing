@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .dataset import generate_dataset, extract_url_features
+from .dataset import generate_dataset, extract_url_features, FIXED_FEATURE_COLUMNS
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -79,7 +79,7 @@ def evaluate_model(y_true, y_pred, model_name):
         'false_positive_rate': false_positive_rate
     }
 
-def calculate_age_based_risk(predictions, features, age_group):
+def calculate_age_based_risk(predictions, features, age_group, model_weights=None):
     """
     Calculate risk level and score based on age group and URL features
     
@@ -87,16 +87,18 @@ def calculate_age_based_risk(predictions, features, age_group):
         predictions: Dictionary containing model predictions
         features: Dictionary of URL features
         age_group: Age group category ('kid', 'teen', 'adult')
+        model_weights: Dictionary of model weights from cross-validation
     
     Returns:
         tuple: (risk_level, risk_score)
     """
-    # Base weights for different models based on their reliability
-    model_weights = {
-        'knn': 0.3,
-        'svm': 0.4,
-        'nb': 0.3
-    }
+    # Use provided model weights or fallback to default weights
+    if model_weights is None:
+        model_weights = {
+            'knn': 0.3,
+            'svm': 0.4,
+            'nb': 0.3
+        }
 
     # Age-specific risk modifiers
     age_modifiers = {
@@ -124,62 +126,215 @@ def calculate_age_based_risk(predictions, features, age_group):
 
     return risk_level, min(risk_score, 1.0)  # Cap risk score at 1.0
 
+def load_url_data():
+    """Load URLs from categorized files and combine them"""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    try:
+        # Load safe URLs with proper header and single column format
+        education_urls = pd.read_csv(os.path.join(base_dir, 'education_urls.csv'), names=['url'], header=None)
+        news_urls = pd.read_csv(os.path.join(base_dir, 'news_urls.csv'), names=['url'], header=None)
+
+        # Load unsafe URLs with proper header and single column format
+        gambling_urls = pd.read_csv(os.path.join(base_dir, 'gambling_urls.csv'), names=['url'], header=None)
+        inappropriate_urls = pd.read_csv(os.path.join(base_dir, 'inappropriate_urls.csv'), names=['url'], header=None)
+        malware_urls = pd.read_csv(os.path.join(base_dir, 'malware_urls.csv'), names=['url'], header=None)
+        adult_urls = pd.read_csv(os.path.join(base_dir, 'adult_urls.csv'), names=['url'], header=None)
+
+        # Combine and label safe URLs
+        safe_urls = pd.concat([education_urls, news_urls])
+        safe_urls['is_blocked'] = 0
+        safe_urls['category'] = 'safe'
+
+        # Combine and label unsafe URLs with specific categories
+        gambling_urls['category'] = 'gambling'
+        inappropriate_urls['category'] = 'inappropriate'
+        malware_urls['category'] = 'malware'
+        adult_urls['category'] = 'adult'
+
+        unsafe_urls = pd.concat([gambling_urls, inappropriate_urls, malware_urls, adult_urls])
+        unsafe_urls['is_blocked'] = 1
+
+        # Combine all and shuffle
+        all_urls = pd.concat([safe_urls, unsafe_urls]).reset_index(drop=True)
+        return all_urls.sample(frac=1, random_state=42)
+
+    except FileNotFoundError as e:
+        logging.error(f"File not found: {e}")
+        return pd.DataFrame()
+    except pd.errors.ParserError as e:
+        logging.error(f"CSV parsing error: {e}")
+        return pd.DataFrame()
+    except Exception as e:
+        logging.error(f"An error occurred: {e}")
+        return pd.DataFrame()
+
 def train_models():
     """Train the ensemble of models for URL classification"""
+    # Define save_dir outside the try block to ensure it's always available
+    save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'latest')
+    os.makedirs(save_dir, exist_ok=True)
+
     try:
         # Generate and preprocess dataset
         logging.info("Generating dataset...")
         dataset = generate_dataset()
-        
-        # Extract features and labels
-        feature_columns = [col for col in dataset.columns if col not in ['url', 'is_blocked', 'category']]
-        X = dataset[feature_columns].values
+
+        # Check if the dataset is empty
+        if dataset.empty:
+            logging.error("Dataset is empty. Check the input CSV files.")
+            return
+
+        # Extract features and target separately
+        # Features are all columns except 'is_blocked'
+        if 'is_blocked' not in dataset.columns:
+            logging.error("'is_blocked' column not found in the dataset.")
+            return
+
+        X = dataset.drop('is_blocked', axis=1).values
         y = dataset['is_blocked'].values
-        
+
+        # Validate feature dimensions
+        if X.shape[1] != len(FIXED_FEATURE_COLUMNS):
+            raise ValueError(f"Feature dimension mismatch. Expected {len(FIXED_FEATURE_COLUMNS)} features, got {X.shape[1]}")
+
+        # Verify all required feature columns are present
+        if isinstance(dataset, pd.DataFrame):
+            missing_features = set(FIXED_FEATURE_COLUMNS) - set(dataset.columns)
+            if missing_features:
+                raise ValueError(f"Missing required feature columns: {missing_features}")
+
         # Split dataset
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42, stratify=y
         )
-        
+
         # Balance training data
         X_train_balanced, y_train_balanced = balance_dataset(X_train, y_train)
-        
+
         # Scale features
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train_balanced)
         X_test_scaled = scaler.transform(X_test)
-        
+
         # Initialize models with hyperparameters
         models = {
             'knn': KNeighborsClassifier(n_neighbors=5, weights='distance'),
             'svm': SVC(kernel='rbf', probability=True, C=1.0),
             'nb': GaussianNB()
         }
+
+        # Enhanced hyperparameter tuning using GridSearchCV
+        param_grid_knn = {
+            'n_neighbors': [3, 5, 7, 9, 11],
+            'weights': ['uniform', 'distance'],
+            'metric': ['euclidean', 'manhattan', 'minkowski'],
+            'p': [1, 2, 3],  # For Minkowski distance
+            'leaf_size': [10, 20, 30, 40]
+        }
+
+        param_grid_svm = {
+            'C': [0.1, 1, 10, 100],
+            'kernel': ['linear', 'rbf', 'poly'],
+            'gamma': ['scale', 'auto', 0.001, 0.01, 0.1],
+            'degree': [2, 3, 4],  # For polynomial kernel
+            'class_weight': ['balanced', None]
+        }
+
+        param_grid_nb = {
+            'var_smoothing': np.logspace(-11, -6, num=20)
+        }
+
+        # Custom scoring function that balances precision and recall
+        scoring = {
+            'f1': 'f1',
+            'precision': make_scorer(precision_score, zero_division=0),
+            'recall': make_scorer(recall_score, zero_division=0)
+        }
+
+        grid_search_knn = GridSearchCV(
+            KNeighborsClassifier(), 
+            param_grid_knn, 
+            cv=5, 
+            scoring=scoring,
+            refit='f1',
+            n_jobs=-1  # Use all available cores
+        )
         
+        grid_search_svm = GridSearchCV(
+            SVC(probability=True), 
+            param_grid_svm, 
+            cv=5, 
+            scoring=scoring,
+            refit='f1',
+            n_jobs=-1
+        )
+        
+        grid_search_nb = GridSearchCV(
+            GaussianNB(), 
+            param_grid_nb, 
+            cv=5, 
+            scoring=scoring,
+            refit='f1',
+            n_jobs=-1
+        )
+
+        # Log start of grid search
+        logging.info("\nStarting Grid Search for optimal hyperparameters...")
+
+        grid_search_knn.fit(X_train_scaled, y_train_balanced)
+        grid_search_svm.fit(X_train_scaled, y_train_balanced)
+        grid_search_nb.fit(X_train_scaled, y_train_balanced)
+
+        # Log best parameters and scores
+        for name, grid_search in [('KNN', grid_search_knn), ('SVM', grid_search_svm), ('NB', grid_search_nb)]:
+            logging.info(f"\n{name} best parameters: {grid_search.best_params_}")
+            logging.info(f"{name} best cross-validation scores:")
+            for metric, scores in grid_search.cv_results_.items():
+                if metric.startswith('mean_test_'):
+                    score_name = metric.replace('mean_test_', '')
+                    score_value = grid_search.cv_results_[metric][grid_search.best_index_]
+                    logging.info(f"{score_name}: {score_value:.4f}")
+
+        best_knn = grid_search_knn.best_estimator_
+        best_svm = grid_search_svm.best_estimator_
+        best_nb = grid_search_nb.best_estimator_
+
+        # Update model weights based on cross-validation scores
+        model_weights = {
+            'knn': grid_search_knn.cv_results_['mean_test_f1'][grid_search_knn.best_index_],
+            'svm': grid_search_svm.cv_results_['mean_test_f1'][grid_search_svm.best_index_],
+            'nb': grid_search_nb.cv_results_['mean_test_f1'][grid_search_nb.best_index_]
+        }
+        
+        # Normalize weights to sum to 1
+        total_weight = sum(model_weights.values())
+        model_weights = {k: v/total_weight for k, v in model_weights.items()}
+        
+        # Save model weights
+        joblib.dump(model_weights, os.path.join(save_dir, 'model_weights.pkl'))
+
         # Train and evaluate each model
         trained_models = {}
-        for name, model in models.items():
+        for name, model in [('knn', best_knn), ('svm', best_svm), ('nb', best_nb)]:
             logging.info(f"\nTraining {name.upper()} model...")
             model.fit(X_train_scaled, y_train_balanced)
-            
+
             # Evaluate
             y_pred = model.predict(X_test_scaled)
             metrics = evaluate_model(y_test, y_pred, name.upper())
             trained_models[name] = model
-            
+
         # Save models and preprocessing objects
-        save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'latest')
-        os.makedirs(save_dir, exist_ok=True)
-        
         for name, model in trained_models.items():
             joblib.dump(model, os.path.join(save_dir, f'{name}_model.pkl'))
-        
+
         # Save scaler and feature columns
         joblib.dump(scaler, os.path.join(save_dir, 'url_scaler.pkl'))
-        joblib.dump(feature_columns, os.path.join(save_dir, 'feature_cols.pkl'))
-        
+        joblib.dump(FIXED_FEATURE_COLUMNS, os.path.join(save_dir, 'feature_cols.pkl'))
+
         logging.info("\nModel training completed successfully!")
-        
+
     except Exception as e:
         logging.error(f"Error during model training: {e}")
         raise
@@ -196,7 +351,7 @@ def predict_url(url, threshold=0.65, models_dir=None, age_group='kid'):
         tuple: (is_unsafe, probability, risk_score)
     """
     try:
-        # Load models and scaler
+        # Load models, scaler, and weights
         if models_dir is None:
             models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'latest')
 
@@ -206,6 +361,7 @@ def predict_url(url, threshold=0.65, models_dir=None, age_group='kid'):
             nb = joblib.load(os.path.join(models_dir, 'nb_model.pkl'))
             scaler = joblib.load(os.path.join(models_dir, 'url_scaler.pkl'))
             feature_cols = joblib.load(os.path.join(models_dir, 'feature_cols.pkl'))
+            model_weights = joblib.load(os.path.join(models_dir, 'model_weights.pkl'))
         except FileNotFoundError as e:
             logging.error(f"Could not load models from {models_dir}. Error: {e}")
             # Initialize empty predictions dictionary to avoid division by zero
@@ -227,6 +383,17 @@ def predict_url(url, threshold=0.65, models_dir=None, age_group='kid'):
             logging.error(f"Feature columns: {feature_cols}")
             logging.error(f"Extracted features: {features}")
             raise ValueError(f"Expected {len(feature_cols)} features, got {len(features)}")
+            
+        # Validate feature names match expected columns
+        if isinstance(features, dict):
+            expected_features = set(feature_cols)
+            actual_features = set(features.keys())
+            if expected_features != actual_features:
+                missing = expected_features - actual_features
+                extra = actual_features - expected_features
+                raise ValueError(
+                    f"Feature mismatch. Missing: {missing}, Extra: {extra}"
+                )
 
         # Scale features
         features_array = np.array(features).reshape(1, -1)
@@ -287,11 +454,12 @@ def predict_url(url, threshold=0.65, models_dir=None, age_group='kid'):
         }
         effective_threshold = age_thresholds.get(age_group, threshold)
         
-        # Get base risk score from models
+        # Get base risk score from models using dynamically loaded weights
         risk_level, risk_score = calculate_age_based_risk(
             predictions,
             base_features,
-            age_group
+            age_group,
+            model_weights
         )
         
         # Apply trust and risk modifiers
