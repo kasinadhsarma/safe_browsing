@@ -36,6 +36,11 @@ from ml.ai.dataset import extract_url_features
 import uvicorn
 import socket
 import whois
+import pickle
+
+def load_model(path: str):
+    with open(path, 'rb') as file:
+        return pickle.load(file)
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -60,6 +65,11 @@ Base = declarative_base()
 
 # Global ML models
 url_model: Optional[Dict] = None
+knn_model = None
+svm_model = None
+naive_bayes_model = None
+url_scaler = None
+feature_cols = None
 
 # Database Models
 class Activity(Base):
@@ -128,13 +138,18 @@ app.add_middleware(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
-    global url_model
+    global url_model, knn_model, svm_model, naive_bayes_model, url_scaler, feature_cols
 
     try:
-        # Train models
-        logging.info("Training URL classification models...")
-        url_model = train_models()
-        if url_model:
+        # Load models
+        logging.info("Loading URL classification models...")
+        knn_model = load_model('backend/ml/ai/models/latest/knn_model.pkl')
+        svm_model = load_model('backend/ml/ai/models/latest/svm_model.pkl')
+        naive_bayes_model = load_model('backend/ml/ai/models/latest/naive_bayes_model.pkl')
+        url_scaler = load_model('backend/ml/ai/models/latest/url_scaler.pkl')
+        feature_cols = load_model('backend/ml/ai/models/latest/feature_cols.pkl')
+
+        if knn_model and svm_model and naive_bayes_model and url_scaler and feature_cols:
             logging.info("URL classification models loaded successfully")
         else:
             logging.warning("URL models not loaded")
@@ -218,7 +233,7 @@ async def get_stats():
 
         # Get ML metrics (if any models have been trained)
         ml_metrics = {}
-        if url_model:
+        if knn_model and svm_model and naive_bayes_model:
             for name, data in url_model.items():
                 if 'metrics' in data:
                     ml_metrics[name] = data['metrics']
@@ -289,7 +304,7 @@ async def check_url(url: str = Form(...), age_group: str = Form("kid")):
                 }
         else:
             # Make prediction with age-based risk assessment
-            if url_model:
+            if knn_model and svm_model and naive_bayes_model:
                 is_blocked, risk_score, predictions = predict_url(
                     url,
                     threshold=0.7 if age_group == "kid" else 0.8,
