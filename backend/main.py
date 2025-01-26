@@ -33,6 +33,9 @@ from pydantic import BaseModel, ConfigDict
 import tempfile
 from ml.ai.training import train_models, predict_url
 from ml.ai.dataset import extract_url_features
+import uvicorn
+import socket
+import whois
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -172,6 +175,20 @@ def determine_risk_level(predictions: dict, age_group: str) -> Tuple[str, bool, 
         return "Medium", age_group == "kid", f"Medium risk content (score: {risk_score:.2f})"
     else:
         return "Low", False, ""
+
+def get_domain_age(domain: str) -> Optional[int]:
+    """Get the age of a domain in days"""
+    try:
+        w = whois.whois(domain)
+        creation_date = w.creation_date
+        if isinstance(creation_date, list):
+            creation_date = creation_date[0]
+        if creation_date:
+            age = (datetime.now() - creation_date).days
+            return age
+    except Exception as e:
+        logging.warning(f"Could not get domain age for {domain}: {e}")
+    return None
 
 # API Endpoints
 @app.get("/api/stats")
@@ -467,31 +484,15 @@ async def get_alerts():
         db.close()
 
 if __name__ == "__main__":
-    import uvicorn
-    import socket
-
-    def is_port_in_use(port):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(('0.0.0.0', port))
-                return False
-            except socket.error:
-                return True
-
+    port = 8000
     try:
-        logging.info("Initializing server...")
-
-        # Try ports from 8000 to 8010
-        port = 8000
-        while port < 8010:
-            if not is_port_in_use(port):
-                logging.info(f"Starting server on port {port}")
-                uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
-                break
-            logging.info(f"Port {port} is in use, trying next port")
-            port += 1
-        else:
-            logging.error("No available ports found between 8000")
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('0.0.0.0', port))  # Check if port is free
+        logging.info(f"Starting server on port {port}")
+        uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    except socket.error:
+        logging.error(f"Port {port} is already in use. Please free the port and try again.")
+        raise SystemExit(1)
     except Exception as e:
         logging.error(f"Server startup error: {str(e)}")
         raise

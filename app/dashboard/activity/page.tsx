@@ -165,7 +165,7 @@ const fetchActivities = async () => {
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline">
-                          {activity.category || 'N/A'}
+                          {activity.category === 'video' ? 'Video' : activity.category === 'audio' ? 'Audio' : activity.category === 'information' ? 'Information' : activity.category === 'adult' ? 'Adult Content' : activity.category || 'N/A'}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -184,10 +184,21 @@ const fetchActivities = async () => {
                       <TableCell>
                         {activity.ml_scores && Object.keys(activity.ml_scores).length > 0 ? 
                           (() => {
-                            const scores = Object.values(activity.ml_scores)
-                              .filter(v => typeof v === 'number' && v >= 0);
-                            return scores.length > 0 ? 
-                              `${(Math.max(...scores) * 100).toFixed(1)}%` : 'N/A';
+                            if (typeof activity.ml_scores === 'object') {
+                              const modelScores = {
+                                knn: typeof activity.ml_scores.knn === 'object' ? (activity.ml_scores.knn as any).probability || 0 : activity.ml_scores.knn || 0,
+                                svm: typeof activity.ml_scores.svm === 'object' ? (activity.ml_scores.svm as any).probability || 0 : activity.ml_scores.svm || 0,
+                                nb: typeof activity.ml_scores.nb === 'object' ? (activity.ml_scores.nb as any).probability || 0 : activity.ml_scores.nb || 0
+                              };
+                              return (
+                                <div>
+                                  <p>KNN: {(modelScores.knn * 100).toFixed(1)}%</p>
+                                  <p>SVM: {(modelScores.svm * 100).toFixed(1)}%</p>
+                                  <p>NB: {(modelScores.nb * 100).toFixed(1)}%</p>
+                                </div>
+                              );
+                            }
+                            return 'N/A';
                           })()
                           : 'N/A'}
                       </TableCell>

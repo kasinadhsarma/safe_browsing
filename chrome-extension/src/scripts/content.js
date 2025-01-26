@@ -91,7 +91,11 @@ class SafeBrowsingChecker {
             formData.append('action', activity.action);
             formData.append('category', activity.category || 'Unknown');
             formData.append('risk_level', activity.risk_level || 'Unknown');
-            formData.append('ml_scores', JSON.stringify(result.predictions || {}));
+            formData.append('ml_scores', JSON.stringify({
+                knn: result.model_predictions?.knn || {},
+                svm: result.model_predictions?.svm || {},
+                nb: result.model_predictions?.nb || {}
+            }));
             formData.append('age_group', activity.age_group);
             formData.append('block_reason', activity.block_reason);
 
@@ -218,8 +222,16 @@ class SafeBrowsingChecker {
                     </div>
                     <div class="info">
                         ${result.block_reason ? `<div class="reason">${result.block_reason}</div>` : ''}
-                        <p class="category">Category: ${result.category || 'Unknown'}</p>
-                        ${result.predictions ? `<p>ML Confidence: ${(result.probability * 100).toFixed(1)}%</p>` : ''}
+                        <p class="category">Category: ${result.category === 'video' ? 'Video' : result.category === 'audio' ? 'Audio' : result.category === 'information' ? 'Information' : result.category === 'adult' ? 'Adult Content' : result.category || 'Unknown'}</p>
+                        ${result.model_predictions ? `
+                            <p>ML Confidence Scores:</p>
+                            <div style="text-align: left; margin: 8px 0;">
+                                <p>KNN: ${(result.model_predictions.knn?.probability * 100 || 0).toFixed(1)}%</p>
+                                <p>SVM: ${(result.model_predictions.svm?.probability * 100 || 0).toFixed(1)}%</p>
+                                <p>NB: ${(result.model_predictions.nb?.probability * 100 || 0).toFixed(1)}%</p>
+                            </div>
+                            <p>Overall Risk Score: ${(result.risk_score * 100).toFixed(1)}%</p>
+                        ` : ''}
                     </div>
                     <button id="continue-btn">Continue Anyway</button>
                 </div>

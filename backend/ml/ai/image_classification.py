@@ -5,8 +5,15 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import models, transforms
 from PIL import Image
 import os
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class ImageDataset(Dataset):
+    """
+    Custom dataset for loading images with optional labels.
+    """
     def __init__(self, image_paths, labels=None, transform=None):
         self.image_paths = image_paths
         self.labels = labels
@@ -14,7 +21,7 @@ class ImageDataset(Dataset):
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                              std=[0.229, 0.224, 0.225])
+                                std=[0.229, 0.224, 0.225])
         ])
 
     def __len__(self):
@@ -32,13 +39,17 @@ class ImageDataset(Dataset):
                 return image, self.labels[idx]
             return image
         except Exception as e:
-            print(f"Error loading image {image_path}: {e}")
+            logging.error(f"Error loading image {image_path}: {e}")
             return None
 
+
 class ImageClassifier(pl.LightningModule):
+    """
+    Image classification model using a pre-trained ResNet18 backbone.
+    """
     def __init__(self, num_classes=2):
         super().__init__()
-        # Load pre-trained ResNet model
+        # Load pre-trained ResNet18 model
         self.model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
 
         # Freeze feature extraction layers
@@ -93,8 +104,12 @@ class ImageClassifier(pl.LightningModule):
 
     def predict_image(self, image_path):
         """
-        Predict if an image is safe or unsafe
-        Returns: (is_safe: bool, confidence: float)
+        Predict if an image is safe or unsafe.
+        Args:
+            image_path: Path to the image file.
+        Returns:
+            is_safe: True if the image is safe, False otherwise.
+            confidence: Confidence score for the prediction.
         """
         try:
             self.eval()
@@ -118,50 +133,61 @@ class ImageClassifier(pl.LightningModule):
 
             return prediction == 0, confidence  # 0 = safe, 1 = unsafe
         except Exception as e:
-            print(f"Error predicting image {image_path}: {e}")
+            logging.error(f"Error predicting image {image_path}: {e}")
             return None, None
+
+
+def load_dataset(data_dir):
+    """
+    Load images and labels from a directory.
+    Args:
+        data_dir: Directory containing 'safe' and 'unsafe' subdirectories.
+    Returns:
+        ImageDataset: Dataset containing image paths and labels.
+    """
+    image_paths = []
+    labels = []
+
+    # Load safe images (label 0)
+    safe_dir = os.path.join(data_dir, 'safe')
+    if os.path.exists(safe_dir):
+        for img in os.listdir(safe_dir):
+            if img.endswith(('.jpg', '.jpeg', '.png')):
+                image_paths.append(os.path.join(safe_dir, img))
+                labels.append(0)
+
+    # Load unsafe images (label 1)
+    unsafe_dir = os.path.join(data_dir, 'unsafe')
+    if os.path.exists(unsafe_dir):
+        for img in os.listdir(unsafe_dir):
+            if img.endswith(('.jpg', '.jpeg', '.png')):
+                image_paths.append(os.path.join(unsafe_dir, img))
+                labels.append(1)
+
+    # Load adult images (label 1)
+    adult_dir = os.path.join(data_dir, 'adult')
+    if os.path.exists(adult_dir):
+        for img in os.listdir(adult_dir):
+            if img.endswith(('.jpg', '.jpeg', '.png')):
+                image_paths.append(os.path.join(adult_dir, img))
+                labels.append(1)
+
+    if not image_paths:
+        raise ValueError(f"No images found in {data_dir}")
+
+    return ImageDataset(image_paths, torch.tensor(labels))
+
 
 def train_model(train_data_dir, val_data_dir=None):
     """
-    Train the image classifier
+    Train the image classifier.
     Args:
-        train_data_dir: Directory with 'safe' and 'unsafe' subdirectories containing training images
-        val_data_dir: Optional directory with validation data structured like train_data_dir
+        train_data_dir: Directory with 'safe' and 'unsafe' subdirectories containing training images.
+        val_data_dir: Optional directory with validation data structured like train_data_dir.
+    Returns:
+        model: Trained ImageClassifier model.
     """
     try:
-        def load_dataset(data_dir):
-            image_paths = []
-            labels = []
-
-            # Load safe images (label 0)
-            safe_dir = os.path.join(data_dir, 'safe')
-            if os.path.exists(safe_dir):
-                for img in os.listdir(safe_dir):
-                    if img.endswith(('.jpg', '.jpeg', '.png')):
-                        image_paths.append(os.path.join(safe_dir, img))
-                        labels.append(0)
-
-            # Load unsafe images (label 1)
-            unsafe_dir = os.path.join(data_dir, 'unsafe')
-            if os.path.exists(unsafe_dir):
-                for img in os.listdir(unsafe_dir):
-                    if img.endswith(('.jpg', '.jpeg', '.png')):
-                        image_paths.append(os.path.join(unsafe_dir, img))
-                        labels.append(1)
-
-            # Load adult images (label 1)
-            adult_dir = os.path.join(data_dir, 'adult')
-            if os.path.exists(adult_dir):
-                for img in os.listdir(adult_dir):
-                    if img.endswith(('.jpg', '.jpeg', '.png')):
-                        image_paths.append(os.path.join(adult_dir, img))
-                        labels.append(1)
-
-            if not image_paths:
-                raise ValueError(f"No images found in {data_dir}")
-
-            return ImageDataset(image_paths, torch.tensor(labels))
-
         # Load datasets
         train_dataset = load_dataset(train_data_dir)
         train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4)
@@ -206,15 +232,21 @@ def train_model(train_data_dir, val_data_dir=None):
         os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
         torch.save(model.state_dict(), model_save_path)
 
+        logging.info(f"Model saved to {model_save_path}")
         return model
     except Exception as e:
-        print(f"Error during model training: {e}")
+        logging.error(f"Error during model training: {e}")
         return None
+
 
 if __name__ == "__main__":
     # Example usage:
-    model = train_model('path/to/train/data', 'path/to/val/data')
+    train_data_dir = 'path/to/train/data'
+    val_data_dir = 'path/to/val/data'
+    model = train_model(train_data_dir, val_data_dir)
+
     if model:
-        is_safe, confidence = model.predict_image('path/to/test/image.jpg')
+        test_image_path = 'path/to/test/image.jpg'
+        is_safe, confidence = model.predict_image(test_image_path)
         if is_safe is not None:
             print(f"Image is {'safe' if is_safe else 'unsafe'} with {confidence:.2%} confidence")
