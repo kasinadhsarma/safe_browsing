@@ -80,6 +80,7 @@ const fetchActivities = async () => {
     switch (risk_level?.toLowerCase()) {
       case 'high': return 'destructive';
       case 'medium': return 'secondary';
+      case 'low': return 'default';
       case 'unknown': return 'outline';
       default: return 'outline';
     }

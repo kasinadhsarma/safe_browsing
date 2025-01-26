@@ -20,7 +20,17 @@ const AlertsPage = () => {
     try {
       setLoading(true);
       const data = await urlService.getAlerts();
-      setAlerts(data);
+      setAlerts(data.map(alert => {
+        return {
+          ...alert,
+          url: alert.url || 'N/A',
+          category: alert.category || 'Unknown',
+          risk_level: alert.risk_level || 'Unknown',
+          age_group: alert.age_group || 'N/A',
+          block_reason: alert.block_reason || '-',
+          ml_scores: alert.ml_scores || {}
+        };
+      }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
       setError(null);
     } catch (error) {
       console.error('Error fetching alerts:', error);
@@ -47,6 +57,16 @@ const AlertsPage = () => {
     const interval = setInterval(fetchAlerts, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  const getBadgeVariant = (risk_level?: string) => {
+    switch (risk_level?.toLowerCase()) {
+      case 'high': return 'destructive';
+      case 'medium': return 'secondary';
+      case 'low': return 'default';
+      case 'unknown': return 'outline';
+      default: return 'outline';
+    }
+  };
 
   if (loading) {
     return (
@@ -88,25 +108,29 @@ const AlertsPage = () => {
                   <TableHead>Risk Level</TableHead>
                   <TableHead>Age Group</TableHead>
                   <TableHead>Block Reason</TableHead>
+                  <TableHead>ML Score</TableHead>
                   <TableHead>Time</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {alerts.map((alert, index) => (
                   <TableRow key={index}>
-                    <TableCell className="font-medium">{alert.url || 'N/A'}</TableCell>
+                    <TableCell className="font-medium max-w-md truncate">
+                      <a
+                        href={alert.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:underline"
+                      >
+                        {alert.url || 'N/A'}
+                      </a>
+                    </TableCell>
                     <TableCell>
                       <Badge variant="destructive">{alert.action}</Badge>
                     </TableCell>
                     <TableCell>{alert.category || 'N/A'}</TableCell>
                     <TableCell>
-                      <Badge
-                        variant={
-                          alert.risk_level?.toLowerCase() === 'high' ? 'destructive' :
-                          alert.risk_level?.toLowerCase() === 'medium' ? 'secondary' :
-                          'default'
-                        }
-                      >
+                      <Badge variant={getBadgeVariant(alert.risk_level)}>
                         {alert.risk_level || 'N/A'}
                       </Badge>
                     </TableCell>
@@ -117,6 +141,27 @@ const AlertsPage = () => {
                     </TableCell>
                     <TableCell className="max-w-xs truncate">
                       {alert.block_reason || '-'}
+                    </TableCell>
+                    <TableCell>
+                      {alert.ml_scores && Object.keys(alert.ml_scores).length > 0 ? 
+                        (() => {
+                          if (typeof alert.ml_scores === 'object') {
+                            const modelScores = {
+                              knn: typeof alert.ml_scores.knn === 'object' ? (alert.ml_scores.knn as any).probability || 0 : alert.ml_scores.knn || 0,
+                              svm: typeof alert.ml_scores.svm === 'object' ? (alert.ml_scores.svm as any).probability || 0 : alert.ml_scores.svm || 0,
+                              nb: typeof alert.ml_scores.nb === 'object' ? (alert.ml_scores.nb as any).probability || 0 : alert.ml_scores.nb || 0
+                            };
+                            return (
+                              <div>
+                                <p>KNN: {(modelScores.knn * 100).toFixed(1)}%</p>
+                                <p>SVM: {(modelScores.svm * 100).toFixed(1)}%</p>
+                                <p>NB: {(modelScores.nb * 100).toFixed(1)}%</p>
+                              </div>
+                            );
+                          }
+                          return 'N/A';
+                        })()
+                        : 'N/A'}
                     </TableCell>
                     <TableCell>
                       {new Date(alert.timestamp).toLocaleString('en-US', {

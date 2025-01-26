@@ -71,6 +71,7 @@ export const urlService = {
     risk_level: string;
     category: string;
     url: string;
+    ml_scores: { [key: string]: number };
   }> {
     const formData = new FormData();
     formData.append('url', url);
