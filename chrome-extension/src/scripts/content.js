@@ -82,7 +82,12 @@ class SafeBrowsingChecker {
                 risk_level: result.risk_level || 'Unknown',
                 timestamp: new Date().toISOString(),
                 age_group: result.age_group || 'kid',
-                block_reason: result.block_reason || ''
+                block_reason: result.block_reason || '',
+                ml_scores: {
+                    knn: result.model_predictions?.knn || {},
+                    svm: result.model_predictions?.svm || {},
+                    nb: result.model_predictions?.nb || {}
+                }
             };
 
             // Create a new FormData instance
@@ -91,11 +96,7 @@ class SafeBrowsingChecker {
             formData.append('action', activity.action);
             formData.append('category', activity.category || 'Unknown');
             formData.append('risk_level', activity.risk_level || 'Unknown');
-            formData.append('ml_scores', JSON.stringify({
-                knn: result.model_predictions?.knn || {},
-                svm: result.model_predictions?.svm || {},
-                nb: result.model_predictions?.nb || {}
-            }));
+            formData.append('ml_scores', JSON.stringify(activity.ml_scores));
             formData.append('age_group', activity.age_group);
             formData.append('block_reason', activity.block_reason);
 
