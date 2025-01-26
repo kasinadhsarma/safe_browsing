@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
 import Link from 'next/link'
-import axios from 'axios';
 
 interface SignupFormProps {
   onSuccess: () => void // Callback for successful signup
@@ -22,17 +21,17 @@ export function SignupForm({ onSuccess, onError }: SignupFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null);
+
+    // Check if passwords match
     if (password !== confirmPassword) {
       setError('Passwords do not match');
       return;
     }
+
+    // Simulate a delay for the "API call"
     try {
-      const response = await axios.post('/api/signup', { email, password });
-      if (response.data.success) {
-        onSuccess();
-      } else {
-        setError(response.data.message || 'Signup failed');
-      }
+      await new Promise((resolve) => setTimeout(resolve, 1000)); // Simulate 1 second delay
+      onSuccess(); // Redirect to dashboard
     } catch (err) {
       setError('An error occurred during signup');
       onError('An error occurred during signup');

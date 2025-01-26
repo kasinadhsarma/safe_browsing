@@ -8,7 +8,11 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import Link from 'next/link'
 import axios from 'axios';
 
-export function ForgotPasswordForm() {
+interface ForgotPasswordFormProps {
+  onSuccess: () => void; // Callback for successful password reset
+}
+
+export function ForgotPasswordForm({ onSuccess }: ForgotPasswordFormProps) {
   const [email, setEmail] = useState('')
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -21,6 +25,7 @@ export function ForgotPasswordForm() {
       const response = await axios.post('/api/forgot-password', { email });
       if (response.data.success) {
         setSuccess('Password reset email sent. Please check your inbox.');
+        onSuccess(); // Call the onSuccess callback
       } else {
         setError(response.data.message || 'Failed to send password reset email.');
       }

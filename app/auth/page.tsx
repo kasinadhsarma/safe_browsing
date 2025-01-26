@@ -6,21 +6,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SignupForm } from '@/components/auth/SignupForm'
 import { LoginForm } from '@/components/auth/LoginForm'
 import { ForgotPasswordForm } from '@/components/auth/ForgotPasswordForm'
-import axios from 'axios';
 
 export default function AuthPage() {
   const [activeTab, setActiveTab] = useState('login')
   const searchParams = useSearchParams()
   const router = useRouter()
-  const [alertsEnabled, setAlertsEnabled] = useState(false);
-  const [youtubeActivityEnabled, setYoutubeActivityEnabled] = useState(false);
 
   useEffect(() => {
     const tab = searchParams.get('tab')
     if (tab && ['signup', 'login', 'forgot-password'].includes(tab)) {
       setActiveTab(tab)
     }
-    fetchSettings();
   }, [searchParams])
 
   const handleTabChange = (value: string) => {
@@ -28,21 +24,15 @@ export default function AuthPage() {
     router.push(`/auth?tab=${value}`, { scroll: false })
   }
 
-  const fetchSettings = async () => {
-    try {
-      const response = await axios.get('/api/settings');
-      setAlertsEnabled(response.data.alertsEnabled);
-      setYoutubeActivityEnabled(response.data.youtubeActivityEnabled);
-    } catch (err) {
-      console.error('Error fetching settings:', err);
-    }
-  }
-
   const handleLoginSuccess = () => {
     router.push('/dashboard')
   }
 
   const handleSignupSuccess = () => {
+    router.push('/dashboard')
+  }
+
+  const handleForgotPasswordSuccess = () => {
     router.push('/dashboard')
   }
 
@@ -61,7 +51,7 @@ export default function AuthPage() {
           <LoginForm onSuccess={handleLoginSuccess} onError={(error) => console.error(error)} />
         </TabsContent>
         <TabsContent value="forgot-password">
-          <ForgotPasswordForm />
+          <ForgotPasswordForm onSuccess={handleForgotPasswordSuccess} />
         </TabsContent>
       </Tabs>
     </div>

@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
 import Link from 'next/link'
-import axios from 'axios';
 
 interface LoginFormProps {
   onSuccess: () => void // Callback for successful login
@@ -21,13 +20,14 @@ export function LoginForm({ onSuccess, onError }: LoginFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null);
+
+    // Mock API call
     try {
-      const response = await axios.post('/api/login', { email, password });
-      if (response.data.success) {
-        onSuccess();
-      } else {
-        setError(response.data.message || 'Login failed');
-      }
+      // Simulate a delay for the API call
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      // Mock successful login
+      onSuccess();
     } catch (err) {
       setError('An error occurred during login');
       onError('An error occurred during login');
