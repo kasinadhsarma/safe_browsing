@@ -1,73 +1,40 @@
+import pandas as pd
 import numpy as np
 import logging
-from sklearn.model_selection import train_test_split, StratifiedKFold
+import os
+import joblib
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold 
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from sklearn.naive_bayes import GaussianNB
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, make_scorer
-from sklearn.utils import resample
-import pandas as pd
-import joblib
-import os
-import sys
-from datetime import datetime
-import json
-import matplotlib.pyplot as plt
-from pathlib import Path
-from urllib.parse import urlparse
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.ensemble import VotingClassifier
 from imblearn.over_sampling import SMOTE
-from sklearn.ensemble import StackingClassifier, VotingClassifier, BaggingClassifier, AdaBoostClassifier
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.decomposition import TruncatedSVD
-from sklearn.pipeline import Pipeline
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.model_selection import cross_val_score
-import optuna
-from optuna.samplers import TPESampler
-
-# Import required functions and variables
-from dataset import generate_dataset, FIXED_FEATURE_COLUMNS
+from .dataset import load_url_data, process_urls_parallel, FIXED_FEATURE_COLUMNS, extract_url_features
+from tqdm import tqdm
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-class FeatureExtractor(BaseEstimator, TransformerMixin):
-    """Custom feature extractor for URL features"""
-    def __init__(self):
-        self.tfidf = TfidfVectorizer(max_features=100)
-        self.svd = TruncatedSVD(n_components=20)
-
-    def fit(self, X, y=None):
-        self.tfidf.fit(X)
-        self.svd.fit(self.tfidf.transform(X))
-        return self
-
-    def transform(self, X):
-        tfidf_features = self.tfidf.transform(X)
-        svd_features = self.svd.transform(tfidf_features)
-        return svd_features
-
 def balance_dataset(X, y):
-    """Balance dataset using SMOTE"""
-    smote = SMOTE(random_state=42)
+    """Balance dataset using SMOTE."""
+    smote = SMOTE(random_state=42, n_jobs=-1)  # Use all CPU cores
     X_balanced, y_balanced = smote.fit_resample(X, y)
     return X_balanced, y_balanced
 
 def evaluate_model(y_true, y_pred, model_name):
-    """Evaluate model using multiple metrics with enhanced reporting"""
+    """Evaluate model metrics."""
     accuracy = accuracy_score(y_true, y_pred)
     precision = precision_score(y_true, y_pred, zero_division=0)
     recall = recall_score(y_true, y_pred, zero_division=0)
     f1 = f1_score(y_true, y_pred, zero_division=0)
 
-    # Calculate additional metrics
+    # Calculate rates
     true_positives = sum((y_true == 1) & (y_pred == 1))
     false_positives = sum((y_true == 0) & (y_pred == 1))
     false_negatives = sum((y_true == 1) & (y_pred == 0))
-
-    # Calculate detection rate and false positive rate
+    
     detection_rate = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
     false_positive_rate = false_positives / (false_positives + sum(y_true == 0)) if (false_positives + sum(y_true == 0)) > 0 else 0
 
@@ -88,176 +55,166 @@ def evaluate_model(y_true, y_pred, model_name):
         'false_positive_rate': false_positive_rate
     }
 
-def objective(trial, X_train, y_train):
-    """Optuna objective function for hyperparameter tuning"""
-    # Define hyperparameters to tune
-    model_name = trial.suggest_categorical('model', ['knn', 'svm', 'nb'])
-    
-    if model_name == 'knn':
-        n_neighbors = trial.suggest_int('n_neighbors', 3, 15)
-        weights = trial.suggest_categorical('weights', ['uniform', 'distance'])
-        model = KNeighborsClassifier(n_neighbors=n_neighbors, weights=weights)
-    
-    elif model_name == 'svm':
-        C = trial.suggest_float('C', 0.1, 10.0, log=True)
-        kernel = trial.suggest_categorical('kernel', ['linear', 'rbf', 'poly'])
-        gamma = trial.suggest_categorical('gamma', ['scale', 'auto'])
-        model = SVC(C=C, kernel=kernel, gamma=gamma, probability=True)
-    
-    elif model_name == 'nb':
-        var_smoothing = trial.suggest_float('var_smoothing', 1e-11, 1e-6, log=True)
-        model = GaussianNB(var_smoothing=var_smoothing)
-    
-    # Evaluate model using cross-validation
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    scores = cross_val_score(model, X_train, y_train, cv=cv, scoring='f1')
-    return scores.mean()
+def predict_url(url):
+    """Predict URL safety using trained models."""
+    try:
+        model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'latest')
+        
+        # Load models and preprocessing objects
+        scaler = joblib.load(os.path.join(model_dir, 'url_scaler.pkl'))
+        feature_cols = joblib.load(os.path.join(model_dir, 'feature_cols.pkl'))
+        
+        # Load individual models
+        models = {
+            'knn': joblib.load(os.path.join(model_dir, 'knn_model.pkl')),
+            'svm': joblib.load(os.path.join(model_dir, 'svm_model.pkl')),
+            'nb': joblib.load(os.path.join(model_dir, 'nb_model.pkl'))
+        }
+        
+        # Extract features and ensure feature names are preserved
+        features_dict = extract_url_features(url)
+        # Create DataFrame with feature names to maintain column order
+        features_df = pd.DataFrame([features_dict], columns=feature_cols)
+        # Scale features and maintain DataFrame structure
+        features_scaled = pd.DataFrame(
+            scaler.transform(features_df),
+            columns=feature_cols
+        )
+        
+        # Get predictions from each model
+        predictions = {}
+        for name, model in models.items():
+            # Get predictions maintaining feature names
+            proba = model.predict_proba(features_scaled.values)[0]
+            predictions[name] = {
+                'is_unsafe': bool(model.predict(features_scaled.values)[0]),
+                'probability': float(proba[1])  # Probability of unsafe class
+            }
+        
+        # Weight predictions based on model reliability
+        weights = {'knn': 0.25, 'svm': 0.45, 'nb': 0.30}
+        weighted_probability = sum(
+            pred['probability'] * weights[name] 
+            for name, pred in predictions.items()
+        )
+        
+        # Overall safety assessment
+        is_unsafe = weighted_probability > 0.45  # Lower threshold for better detection
+        
+        return predictions, is_unsafe, weighted_probability
+        
+    except Exception as e:
+        logging.error(f"Error during URL prediction: {e}")
+        raise
 
 def train_models():
-    """Train the ensemble of models for URL classification with advanced techniques"""
+    """Train models with parallel feature extraction."""
     save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'latest')
     os.makedirs(save_dir, exist_ok=True)
 
     try:
-        # Generate and preprocess dataset
-        logging.info("Generating dataset...")
-        dataset = generate_dataset()  # Now defined or imported
-
+        # Load URLs
+        logging.info("Loading dataset...")
+        dataset = load_url_data()
         if dataset.empty:
-            logging.error("Dataset is empty. Check the input CSV files.")
+            logging.error("Dataset is empty. Check input files.")
             return
 
-        X = dataset.drop('is_blocked', axis=1).values
+        # Extract features in parallel 
+        logging.info("Extracting features using parallel processing...")
+        features = process_urls_parallel(dataset['url'], max_workers=50)
+        
+        # Convert features to DataFrame
+        X = pd.DataFrame(features, columns=FIXED_FEATURE_COLUMNS)
         y = dataset['is_blocked'].values
 
-        # Split dataset
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+        # Remove rows with all zero features
+        valid_rows = (X != 0).any(axis=1)
+        X = X[valid_rows]
+        y = y[valid_rows]
 
-        # Balance training data using SMOTE
+        logging.info(f"Successfully processed {len(X)} URLs out of {len(dataset)}")
+
+        # Split and balance dataset
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
         X_train_balanced, y_train_balanced = balance_dataset(X_train, y_train)
 
-        # Scale features
+        # Scale features with named columns
         scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train_balanced)
-        X_test_scaled = scaler.transform(X_test)
+        X_train_scaled = pd.DataFrame(
+            scaler.fit_transform(X_train_balanced),
+            columns=X_train_balanced.columns
+        )
+        X_test_scaled = pd.DataFrame(
+            scaler.transform(X_test),
+            columns=X_test.columns
+        )
 
-        # Use Optuna for hyperparameter tuning
-        logging.info("Starting hyperparameter tuning with Optuna...")
-        study = optuna.create_study(direction='maximize', sampler=TPESampler())
-        study.optimize(lambda trial: objective(trial, X_train_scaled, y_train_balanced), n_trials=50)
-
-        # Get the best hyperparameters
-        best_params = study.best_params
-        logging.info(f"Best hyperparameters: {best_params}")
-
-        # Train the best model
-        if best_params['model'] == 'knn':
-            model = KNeighborsClassifier(
-                n_neighbors=best_params['n_neighbors'],
-                weights=best_params['weights']
+        # Initialize models with multicore support where possible
+        models = {
+            'knn': KNeighborsClassifier(
+                n_neighbors=7,
+                weights='distance',
+                metric='euclidean',
+                n_jobs=-1  # Use all cores
+            ),
+            'svm': SVC(
+                C=0.8,
+                kernel='rbf',
+                gamma='scale',
+                probability=True,
+                class_weight='balanced',
+                max_iter=1000
+            ),
+            'nb': GaussianNB(
+                var_smoothing=1e-8,
+                priors=None
             )
-        elif best_params['model'] == 'svm':
-            model = SVC(
-                C=best_params['C'],
-                kernel=best_params['kernel'],
-                gamma=best_params['gamma'],
-                probability=True
-            )
-        elif best_params['model'] == 'nb':
-            model = GaussianNB(var_smoothing=best_params['var_smoothing'])
+        }
 
-        logging.info(f"Training best model: {best_params['model']}")
-        model.fit(X_train_scaled, y_train_balanced)
+        # Train and evaluate each model
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        for name, model in models.items():
+            logging.info(f"Training {name} model...")
+            
+            # Cross-validation
+            cv_scores = cross_val_score(model, X_train_scaled, y_train_balanced, cv=cv, scoring='f1', n_jobs=-1)
+            logging.info(f"Cross-validation F1 scores: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+            
+            # Train final model
+            model.fit(X_train_scaled, y_train_balanced)
+            y_pred = model.predict(X_test_scaled)
+            evaluate_model(y_test, y_pred, name.upper())
+            joblib.dump(model, os.path.join(save_dir, f'{name}_model.pkl'))
 
-        # Evaluate the best model
-        y_pred = model.predict(X_test_scaled)
-        metrics = evaluate_model(y_test, y_pred, f"Best Model ({best_params['model']})")
-        joblib.dump(model, os.path.join(save_dir, 'best_model.pkl'))
+        # Create ensemble
+        voting_clf = VotingClassifier(
+            estimators=[
+                ('knn', models['knn']),
+                ('svm', models['svm']), 
+                ('nb', models['nb'])
+            ],
+            voting='soft',
+            weights=[0.25, 0.45, 0.30]  # Weight by performance
+        )
+        
+        logging.info("Training ensemble model...")
+        voting_clf.fit(X_train_scaled, y_train_balanced)
+        y_pred_ensemble = voting_clf.predict(X_test_scaled)
+        evaluate_model(y_test, y_pred_ensemble, "ENSEMBLE")
+        joblib.dump(voting_clf, os.path.join(save_dir, 'ensemble_model.pkl'))
 
-        # Save models and preprocessing objects
+        # Save preprocessing objects with feature names
+        scaler.feature_names_in_ = X_train_balanced.columns
         joblib.dump(scaler, os.path.join(save_dir, 'url_scaler.pkl'))
-        joblib.dump(FIXED_FEATURE_COLUMNS, os.path.join(save_dir, 'feature_cols.pkl'))
+        joblib.dump(list(X_train_balanced.columns), os.path.join(save_dir, 'feature_cols.pkl'))
 
         logging.info("\nModel training completed successfully!")
 
     except Exception as e:
         logging.error(f"Error during model training: {e}")
-        raise
-
-def predict_url(url):
-    """
-    Predict URL safety information using the trained model
-    
-    Args:
-        url (str): The URL to classify
-        
-    Returns:
-        dict: Dictionary containing:
-            - is_blocked (bool): Whether the URL should be blocked
-            - confidence (float): Prediction confidence score
-            - risk_features (dict): Dictionary of risk features like:
-                - kid_unsafe_score
-                - teen_unsafe_score
-                - suspicious_word_count
-                - has_malicious_content
-            - category (str): Predicted category (e.g., 'safe', 'adult', 'malware', etc.)
-    """
-    try:
-        model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'latest')
-        
-        # Load the saved model and preprocessing objects
-        model = joblib.load(os.path.join(model_dir, 'best_model.pkl'))
-        scaler = joblib.load(os.path.join(model_dir, 'url_scaler.pkl'))
-        feature_cols = joblib.load(os.path.join(model_dir, 'feature_cols.pkl'))
-        
-        # Extract features using the same logic as in dataset.py
-        from .dataset import extract_url_features
-        features_dict = extract_url_features(url)
-        
-        # Convert features dict to list in the same order as feature_cols
-        features = [features_dict[col] for col in feature_cols]
-        
-        # Scale features
-        features_scaled = scaler.transform([features])
-        
-        # Make prediction with probability
-        is_blocked = bool(model.predict(features_scaled)[0])
-        
-        # Get prediction probability
-        prob = model.predict_proba(features_scaled)[0]
-        confidence = float(prob[1] if is_blocked else prob[0])
-        
-        # Extract relevant risk features
-        risk_features = {
-            'kid_unsafe_score': float(features_dict['kid_unsafe_score']),
-            'teen_unsafe_score': float(features_dict['teen_unsafe_score']),
-            'suspicious_word_count': float(features_dict['suspicious_word_count']),
-            'has_malicious_content': bool(features_dict['has_suspicious_words'])
-        }
-        
-        # Determine category based on features
-        category = 'safe'
-        if is_blocked:
-            if features_dict['kid_unsafe_score'] > 0.7:
-                category = 'adult'
-            elif features_dict['has_executable'] > 0:
-                category = 'malware'
-            elif features_dict['suspicious_word_count'] > 5:
-                category = 'inappropriate'
-            elif features_dict['has_suspicious_params'] > 0:
-                category = 'suspicious'
-            else:
-                category = 'blocked'
-        
-        return {
-            'is_blocked': is_blocked,
-            'confidence': confidence,
-            'risk_features': risk_features,
-            'category': category
-        }
-        
-    except Exception as e:
-        logging.error(f"Error during URL prediction: {e}")
         raise
 
 if __name__ == "__main__":

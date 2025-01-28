@@ -1,22 +1,8 @@
-"""
-Safe Browsing for Kids Under Parental Supervision Using Machine Learning
-
-ABSTRACT:
-Since birth, 21st century children have access to various websites through their devices. However, not all internet content is child-friendly, and children may encounter violent or inappropriate images that can negatively impact their development. Many websites contain ads that may display unsuitable content. This system provides parental controls using three supervised machine learning techniques (K-Nearest Neighbor, Support Vector Machine, and Naive Bayes Classifier) for URL classification, combined with deep learning for image detection to block inappropriate content.
-
-Key Features:
-1. Parental control settings for different age groups
-2. Real-time URL classification using ensemble ML models
-3. Image content detection using deep learning
-4. Detailed activity logging and reporting
-5. Customizable risk thresholds for different age groups
-"""
-
+import os
 from fastapi import FastAPI, HTTPException, Form, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import sys
-import os
 import time
 import json
 import logging
@@ -37,6 +23,11 @@ import uvicorn
 import socket
 import whois
 import pickle
+import urllib3
+from urllib3.exceptions import InsecureRequestWarning
+
+# Suppress only the InsecureRequestWarning from urllib3
+urllib3.disable_warnings(InsecureRequestWarning)
 
 # Set up logging
 logging.basicConfig(
@@ -52,7 +43,19 @@ logging.basicConfig(
 DATABASE_PATH = "./safebrowsing.db"
 if os.path.exists(DATABASE_PATH):
     os.remove(DATABASE_PATH)  # Remove existing database to avoid schema conflicts
+
 DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
+
+# Create database directory with proper permissions
+db_dir = os.path.dirname(DATABASE_PATH)
+if db_dir and not os.path.exists(db_dir):
+    os.makedirs(db_dir, mode=0o777)
+
+# Create empty database file with write permissions
+with open(DATABASE_PATH, 'w') as f:
+    pass
+os.chmod(DATABASE_PATH, 0o666)
+
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False}
@@ -61,6 +64,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # Global ML model and preprocessing objects
+knn_model = None
+svm_model = None
+naive_bayes_model = None
 best_model = None
 url_scaler = None
 feature_cols = None
@@ -132,20 +138,35 @@ app.add_middleware(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
-    global best_model, url_scaler, feature_cols
+    global knn_model, svm_model, naive_bayes_model, best_model, url_scaler, feature_cols
 
     try:
         # Load model and preprocessing objects
-        logging.info("Loading URL classification model...")
+        logging.info("Loading URL classification models...")
         model_dir = 'backend/ml/ai/models/latest'
-        best_model = load_model(os.path.join(model_dir, 'best_model.pkl'))
-        url_scaler = load_model(os.path.join(model_dir, 'url_scaler.pkl'))
-        feature_cols = load_model(os.path.join(model_dir, 'feature_cols.pkl'))
 
-        if best_model and url_scaler and feature_cols:
-            logging.info("URL classification model loaded successfully")
-        else:
-            logging.warning("URL model not loaded")
+        # Load all required models with error checking
+        required_models = {
+            'knn_model.pkl': 'knn_model',
+            'svm_model.pkl': 'svm_model',
+            'naive_bayes_model.pkl': 'naive_bayes_model',
+            'best_model.pkl': 'best_model',
+            'url_scaler.pkl': 'url_scaler',
+            'feature_cols.pkl': 'feature_cols'
+        }
+
+        models = {}
+        for filename, model_name in required_models.items():
+            model_path = os.path.join(model_dir, filename)
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"Model file not found: {model_path}")
+            models[model_name] = load_model(model_path)
+            if models[model_name] is None:
+                raise ValueError(f"Failed to load model: {model_name}")
+
+        # Assign models to global variables
+        globals().update(models)
+        logging.info("URL classification models loaded successfully")
 
         yield
 
@@ -160,8 +181,15 @@ app.lifespan = lifespan
 # Utility Functions
 def load_model(path: str):
     """Load a model from a pickle file"""
-    with open(path, 'rb') as file:
-        return pickle.load(file)
+    try:
+        with open(path, 'rb') as file:
+            model = pickle.load(file)
+            if hasattr(model, 'feature_names_in_') and model.feature_names_in_ is None:
+                model.feature_names_in_ = feature_cols if 'feature_cols' in globals() else []
+            return model
+    except Exception as e:
+        logging.error(f"Error loading model {path}: {e}")
+        return None
 
 def determine_risk_level(predictions: dict, age_group: str) -> Tuple[str, bool, str]:
     """Determine risk level and blocking decision based on predictions and age group"""
@@ -174,16 +202,16 @@ def determine_risk_level(predictions: dict, age_group: str) -> Tuple[str, bool, 
         # Calculate risk score based on age group
         if age_group == "kid":
             risk_score = max(kid_unsafe, suspicious * 0.5)
-            high_threshold = 0.7
-            medium_threshold = 0.4
+            high_threshold = 0.4
+            medium_threshold = 0.2
         elif age_group == "teen":
             risk_score = max(teen_unsafe, suspicious * 0.3)
-            high_threshold = 0.8
-            medium_threshold = 0.6
+            high_threshold = 0.5
+            medium_threshold = 0.3
         else:  # adult
             risk_score = max(teen_unsafe * 0.5, suspicious * 0.2)
-            high_threshold = 0.9
-            medium_threshold = 0.7
+            high_threshold = 0.6
+            medium_threshold = 0.4
 
         # Determine risk level and blocking decision
         if risk_score >= high_threshold:
@@ -208,6 +236,8 @@ def get_domain_age(domain: str) -> Optional[int]:
         if creation_date:
             age = (datetime.now() - creation_date).days
             return age
+    except whois.parser.PywhoisError as e:
+        logging.warning(f"WHOIS lookup failed for {domain}: {e}")
     except Exception as e:
         logging.warning(f"Could not get domain age for {domain}: {e}")
     return None
@@ -240,12 +270,12 @@ async def get_stats():
 
         # Get ML metrics (if model has been trained)
         ml_metrics = {}
-        if best_model:
+        if knn_model:
             # Get metrics from MLMetrics table
             latest_metrics = db.query(MLMetrics)\
                 .order_by(MLMetrics.timestamp.desc())\
                 .first()
-            
+
             if latest_metrics:
                 ml_metrics['model'] = {
                     'accuracy': latest_metrics.accuracy,
@@ -281,6 +311,7 @@ async def get_stats():
 @app.post("/api/check-url")
 async def check_url(url: str = Form(...), age_group: str = Form("kid")):
     """Check if a URL should be blocked based on ML predictions and age group"""
+    db = SessionLocal()
     try:
         # Extract features
         features = extract_url_features(url)
@@ -327,22 +358,19 @@ async def check_url(url: str = Form(...), age_group: str = Form("kid")):
         else:
             # Make prediction with enhanced URL analysis
             try:
-                prediction = predict_url(url)
-                
+                predictions, is_unsafe, probability = predict_url(url)
                 result = {
-                    "blocked": prediction['is_blocked'],
-                    "probability": prediction['confidence'],
-                    "risk_level": "High" if prediction['risk_features']['kid_unsafe_score'] > 0.7 else 
-                                "Medium" if prediction['risk_features']['kid_unsafe_score'] > 0.4 else "Low",
-                    "category": prediction['category'],
+                    "blocked": is_unsafe,
+                    "probability": probability,
+                    "risk_level": "High" if probability > 0.7 else
+                                "Medium" if probability > 0.4 else "Low",
+                    "category": "Unsafe" if is_unsafe else "Safe",
                     "url": url,
-                    "predictions": {
-                        "risk_features": prediction['risk_features']
-                    },
+                    "predictions": predictions,
                     "ml_scores": {
-                        "kid_unsafe": prediction['risk_features']['kid_unsafe_score'],
-                        "teen_unsafe": prediction['risk_features']['teen_unsafe_score'],
-                        "suspicious": float(prediction['risk_features']['suspicious_word_count'])
+                        "kid_unsafe": probability * 0.8,  # Scaled for age groups
+                        "teen_unsafe": probability * 0.6,
+                        "suspicious": probability
                     }
                 }
             except Exception as e:
@@ -366,35 +394,28 @@ async def check_url(url: str = Form(...), age_group: str = Form("kid")):
                     }
                 }
 
+        # Determine risk level and blocking decision
+        risk_level, should_block, block_reason = determine_risk_level(result, age_group)
+
+        # Update result with new risk assessment
+        result["blocked"] = should_block
+        result["risk_level"] = risk_level
+        result["block_reason"] = block_reason if should_block else ""
+
         # Log activity
-        db = SessionLocal()
-        try:
-            # Determine risk level and blocking decision
-            risk_level, should_block, block_reason = determine_risk_level(result, age_group)
-
-            # Update result with new risk assessment
-            result["blocked"] = should_block
-            result["risk_level"] = risk_level
-            result["block_reason"] = block_reason if should_block else ""
-
-            activity = Activity(
-                id=os.urandom(16).hex(),
-                url=url.strip(),  # Remove any whitespace
-                action="blocked" if should_block else "allowed",
-                category=result.get("category", "Internal"),
-                risk_level=risk_level,
-                ml_scores={k: v for k, v in result.get("ml_scores", {}).items()
-                          if isinstance(v, (int, float)) and v >= 0},  # Filter valid scores
-                age_group=age_group.strip(),
-                block_reason=block_reason if should_block else None
-            )
-            db.add(activity)
-            db.commit()
-        except Exception as db_error:
-            logging.error(f"Database error: {db_error}")
-            db.rollback()
-        finally:
-            db.close()
+        activity = Activity(
+            id=os.urandom(16).hex(),
+            url=url.strip(),  # Remove any whitespace
+            action="blocked" if should_block else "allowed",
+            category=result.get("category", "Internal"),
+            risk_level=risk_level,
+            ml_scores={k: v for k, v in result.get("ml_scores", {}).items()
+                      if isinstance(v, (int, float)) and v >= 0},  # Filter valid scores
+            age_group=age_group.strip(),
+            block_reason=block_reason if should_block else None
+        )
+        db.add(activity)
+        db.commit()
 
         return {
             **result,
@@ -406,8 +427,10 @@ async def check_url(url: str = Form(...), age_group: str = Form("kid")):
         }
 
     except Exception as e:
-        logging.error(f"Error checking URL: {str(e)}")
+        logging.error(f"Error in check_url: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 
 @app.post("/api/activity")
 async def log_activity(request: Request):
