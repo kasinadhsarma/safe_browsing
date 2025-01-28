@@ -1,27 +1,13 @@
 import logging
 import os
-from training import predict_url, calculate_age_based_risk
+import sys
+from pathlib import Path
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Add parent directory to path
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
-# Test URLs
-test_urls = [
-    # Safe URLs
-    "https://www.wikipedia.org/wiki/Machine_learning",
-    "https://www.python.org/downloads/",
-    "https://github.com/features",
-
-    # Potentially unsafe URLs
-    "http://suspicious-site.xyz/download.exe",
-    "http://192.168.1.1/admin/hack.php",
-    "http://free-casino-games.tk/poker",
-]
-
-import logging
-import os
-from training import predict_url, calculate_age_based_risk
-from image_classification import load_image_from_url, classify_image, is_inappropriate, handle_inappropriate_image
+from ml.ai.training import predict_url, calculate_age_based_risk
+from ml.ai.image_classification import load_image_from_url, classify_image, is_inappropriate, handle_inappropriate_image
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

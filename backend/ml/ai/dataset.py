@@ -9,12 +9,49 @@ import os
 import tld
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset, DataLoader
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+import requests
+from bs4 import BeautifulSoup
+import whois
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Global TF-IDF vectorizer to ensure consistent features
 global_tfidf_vectorizer = TfidfVectorizer(max_features=20)
+
+# Age-specific risk thresholds
+AGE_GROUP_THRESHOLDS = {
+    'kid': 0.5,    # Strict threshold for kids
+    'teen': 0.6,   # Moderate threshold for teens
+    'adult': 0.7   # Lenient threshold for adults
+}
+
+# Suspicious words for age groups
+KID_UNSAFE_WORDS = r'(sex|porn|adult|dating|drug|gamble|bet|violence|gore|death|hate|weapon|abuse|exploit)'
+TEEN_UNSAFE_WORDS = r'(hack|crack|cheat|free-money|betting|smoking|vaping|alcohol|weapon|violence|drug|porn)'
+
+# Define fixed feature columns to ensure consistency
+FIXED_FEATURE_COLUMNS = [
+    'length', 'num_dots', 'num_digits', 'num_special', 'entropy', 'token_count',
+    *[f'tfidf_{i}' for i in range(20)],  # Fixed 20 TF-IDF features
+    'domain_age_days', 'is_new_domain', 'page_text_length', 'page_entropy',
+    'page_suspicious_word_count', 'avg_token_length', 'max_token_length',
+    'min_token_length', 'domain_length', 'has_subdomain', 'has_www',
+    'domain_entropy', 'is_ip_address', 'domain_digit_ratio',
+    'domain_special_ratio', 'domain_uppercase_ratio', 'path_length',
+    'num_directories', 'path_entropy', 'has_double_slash',
+    'directory_length_mean', 'directory_length_max', 'directory_length_min',
+    'path_special_ratio', 'num_params', 'query_length', 'has_suspicious_params',
+    'max_param_length', 'mean_param_length', 'param_entropy',
+    'param_special_ratio', 'has_https', 'has_port', 'suspicious_tld',
+    'has_fragment', 'has_redirect', 'has_obfuscation', 'has_suspicious_words',
+    'suspicious_word_count', 'suspicious_word_ratio', 'has_executable',
+    'has_archive', 'kid_unsafe_words', 'teen_unsafe_words', 'kid_unsafe_ratio',
+    'teen_unsafe_ratio', 'kid_unsafe_score', 'teen_unsafe_score'
+]
 
 def load_url_data():
     """Load URLs from categorized files and combine them"""
@@ -24,7 +61,7 @@ def load_url_data():
         # Load safe URLs with proper header and single column format
         education_urls = pd.read_csv(os.path.join(base_dir, 'education_urls.csv'), names=['url'], header=None)
         news_urls = pd.read_csv(os.path.join(base_dir, 'news_urls.csv'), names=['url'], header=None)
-
+        social_urls = pd.read_csv(os.path.join(base_dir, 'social_urls.csv'), names=['url'], header=None)
         # Load unsafe URLs with proper header and single column format
         gambling_urls = pd.read_csv(os.path.join(base_dir, 'gambling_urls.csv'), names=['url'], header=None)
         inappropriate_urls = pd.read_csv(os.path.join(base_dir, 'inappropriate_urls.csv'), names=['url'], header=None)
@@ -84,10 +121,6 @@ def get_tokenized_url(url):
 def get_domain_age(domain):
     """Get domain age in days using whois"""
     try:
-        import whois
-        from datetime import datetime
-
-        # Get domain info
         domain_info = whois.whois(domain)
 
         # Get creation date (handle both single date and list cases)
@@ -107,9 +140,6 @@ def get_domain_age(domain):
 def get_page_content(url):
     """Fetch and analyze page content"""
     try:
-        import requests
-        from bs4 import BeautifulSoup
-
         # Fetch page content
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
@@ -135,29 +165,8 @@ def get_page_content(url):
         logging.warning(f"Could not get page content for {url}: {e}")
         return ""
 
-# Define fixed feature columns to ensure consistency
-FIXED_FEATURE_COLUMNS = [
-    'length', 'num_dots', 'num_digits', 'num_special', 'entropy', 'token_count',
-    *[f'tfidf_{i}' for i in range(20)],  # Fixed 20 TF-IDF features
-    'domain_age_days', 'is_new_domain', 'page_text_length', 'page_entropy',
-    'page_suspicious_word_count', 'avg_token_length', 'max_token_length',
-    'min_token_length', 'domain_length', 'has_subdomain', 'has_www',
-    'domain_entropy', 'is_ip_address', 'domain_digit_ratio',
-    'domain_special_ratio', 'domain_uppercase_ratio', 'path_length',
-    'num_directories', 'path_entropy', 'has_double_slash',
-    'directory_length_mean', 'directory_length_max', 'directory_length_min',
-    'path_special_ratio', 'num_params', 'query_length', 'has_suspicious_params',
-    'max_param_length', 'mean_param_length', 'param_entropy',
-    'param_special_ratio', 'has_https', 'has_port', 'suspicious_tld',
-    'has_fragment', 'has_redirect', 'has_obfuscation', 'has_suspicious_words',
-    'suspicious_word_count', 'suspicious_word_ratio', 'has_executable',
-    'has_archive', 'kid_unsafe_words', 'teen_unsafe_words', 'kid_unsafe_ratio',
-    'teen_unsafe_ratio', 'kid_unsafe_score', 'teen_unsafe_score'
-]
-
 def extract_url_features(url):
     """Extract enhanced features from URL for classification"""
-    # Initialize all features with default values
     features = {col: 0.0 for col in FIXED_FEATURE_COLUMNS}
 
     try:
@@ -191,11 +200,6 @@ def extract_url_features(url):
                     features[f'tfidf_{i}'] = float(tfidf_features[0, i])
             except Exception as e:
                 logging.warning(f"Error extracting TF-IDF features: {e}")
-
-        # Ensure TF-IDF vectorizer is fitted
-        if not global_tfidf_vectorizer.vocabulary_:
-            logging.warning("TF-IDF vectorizer is not fitted")
-            return features
 
         # Add domain reputation features
         domain = parsed.netloc
@@ -283,11 +287,8 @@ def extract_url_features(url):
         features['has_archive'] = float(bool(re.search(r'\.(zip|rar|7z|tar|gz|bz2|xz)$', url.lower())))
 
         # Age group risk features
-        kid_unsafe_pattern = r'(sex|porn|adult|dating|drug|gamble|bet|violence|gore|death|hate|weapon|abuse|exploit)'
-        teen_unsafe_pattern = r'(hack|crack|cheat|free-money|betting|smoking|vaping|alcohol|weapon|violence|drug|porn)'
-
-        features['kid_unsafe_words'] = float(len(re.findall(kid_unsafe_pattern, url.lower())))
-        features['teen_unsafe_words'] = float(len(re.findall(teen_unsafe_pattern, url.lower())))
+        features['kid_unsafe_words'] = float(len(re.findall(KID_UNSAFE_WORDS, url.lower())))
+        features['teen_unsafe_words'] = float(len(re.findall(TEEN_UNSAFE_WORDS, url.lower())))
         features['kid_unsafe_ratio'] = features['kid_unsafe_words'] / features['token_count'] if features['token_count'] > 0 else 0.0
         features['teen_unsafe_ratio'] = features['teen_unsafe_words'] / features['token_count'] if features['token_count'] > 0 else 0.0
         features['kid_unsafe_score'] = features['kid_unsafe_ratio'] * 2 if features['has_https'] == 0 else features['kid_unsafe_ratio']
@@ -306,9 +307,6 @@ def extract_url_features(url):
     except Exception as e:
         logging.error(f"Error extracting URL features: {e}")
         return features  # Return initialized features rather than empty dict
-
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
 
 def generate_dataset():
     """Generate enhanced dataset with URL features and labels using parallel processing"""

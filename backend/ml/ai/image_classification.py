@@ -6,6 +6,9 @@ from torchvision import models, transforms
 from PIL import Image
 import os
 import logging
+import requests
+from io import BytesIO
+import torch
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -239,6 +242,78 @@ def train_model(train_data_dir, val_data_dir=None):
         return None
 
 
+def load_image_from_url(url):
+    """
+    Load an image from a URL.
+    Args:
+        url: URL of the image
+    Returns:
+        PIL Image object or None if failed
+    """
+    try:
+        response = requests.get(url, timeout=10)
+        img = Image.open(BytesIO(response.content)).convert('RGB')
+        return img
+    except Exception as e:
+        logging.error(f"Error loading image from URL {url}: {e}")
+        return None
+
+def classify_image(image):
+    """
+    Classify an image using the pre-trained model.
+    Args:
+        image: PIL Image object
+    Returns:
+        Label indicating if the image is appropriate or not
+    """
+    try:
+        model = ImageClassifier()
+        # Load the pre-trained model
+        model_path = 'ml/ai/models/image_classifier_final.pth'
+        if os.path.exists(model_path):
+            model.load_state_dict(torch.load(model_path))
+            model.eval()
+
+            transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                  std=[0.229, 0.224, 0.225])
+            ])
+
+            # Process image
+            image_tensor = transform(image).unsqueeze(0)
+            with torch.no_grad():
+                output = model(image_tensor)
+                probabilities = output[0]
+                prediction = torch.argmax(probabilities).item()
+                return "inappropriate" if prediction == 1 else "appropriate"
+        else:
+            logging.error(f"Model file not found at {model_path}")
+            return None
+    except Exception as e:
+        logging.error(f"Error classifying image: {e}")
+        return None
+
+def is_inappropriate(label):
+    """
+    Check if the classification label indicates inappropriate content.
+    Args:
+        label: Classification label from classify_image
+    Returns:
+        Boolean indicating if the content is inappropriate
+    """
+    return label == "inappropriate"
+
+def handle_inappropriate_image(image):
+    """
+    Handle detection of inappropriate image content.
+    Args:
+        image: PIL Image object that was classified as inappropriate
+    """
+    logging.warning("Inappropriate image content detected!")
+    # Add any additional handling logic here, e.g. saving to a log, sending alerts, etc.
+
 if __name__ == "__main__":
     # Example usage:
     train_data_dir = 'path/to/train/data'
@@ -246,7 +321,16 @@ if __name__ == "__main__":
     model = train_model(train_data_dir, val_data_dir)
 
     if model:
+        # Test with local image
         test_image_path = 'path/to/test/image.jpg'
         is_safe, confidence = model.predict_image(test_image_path)
         if is_safe is not None:
             print(f"Image is {'safe' if is_safe else 'unsafe'} with {confidence:.2%} confidence")
+
+        # Test with URL
+        test_url = "https://example.com/test.jpg"
+        image = load_image_from_url(test_url)
+        if image:
+            label = classify_image(image)
+            if label and is_inappropriate(label):
+                handle_inappropriate_image(image)

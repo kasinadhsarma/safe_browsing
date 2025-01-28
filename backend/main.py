@@ -38,9 +38,6 @@ import socket
 import whois
 import pickle
 
-def load_model(path: str):
-    with open(path, 'rb') as file:
-        return pickle.load(file)
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -63,11 +60,8 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Global ML models
-url_model: Optional[Dict] = None
-knn_model = None
-svm_model = None
-naive_bayes_model = None
+# Global ML model and preprocessing objects
+best_model = None
 url_scaler = None
 feature_cols = None
 
@@ -138,21 +132,20 @@ app.add_middleware(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
-    global url_model, knn_model, svm_model, naive_bayes_model, url_scaler, feature_cols
+    global best_model, url_scaler, feature_cols
 
     try:
-        # Load models
-        logging.info("Loading URL classification models...")
-        knn_model = load_model('backend/ml/ai/models/latest/knn_model.pkl')
-        svm_model = load_model('backend/ml/ai/models/latest/svm_model.pkl')
-        naive_bayes_model = load_model('backend/ml/ai/models/latest/naive_bayes_model.pkl')
-        url_scaler = load_model('backend/ml/ai/models/latest/url_scaler.pkl')
-        feature_cols = load_model('backend/ml/ai/models/latest/feature_cols.pkl')
+        # Load model and preprocessing objects
+        logging.info("Loading URL classification model...")
+        model_dir = 'backend/ml/ai/models/latest'
+        best_model = load_model(os.path.join(model_dir, 'best_model.pkl'))
+        url_scaler = load_model(os.path.join(model_dir, 'url_scaler.pkl'))
+        feature_cols = load_model(os.path.join(model_dir, 'feature_cols.pkl'))
 
-        if knn_model and svm_model and naive_bayes_model and url_scaler and feature_cols:
-            logging.info("URL classification models loaded successfully")
+        if best_model and url_scaler and feature_cols:
+            logging.info("URL classification model loaded successfully")
         else:
-            logging.warning("URL models not loaded")
+            logging.warning("URL model not loaded")
 
         yield
 
@@ -165,31 +158,45 @@ async def lifespan(app: FastAPI):
 app.lifespan = lifespan
 
 # Utility Functions
+def load_model(path: str):
+    """Load a model from a pickle file"""
+    with open(path, 'rb') as file:
+        return pickle.load(file)
+
 def determine_risk_level(predictions: dict, age_group: str) -> Tuple[str, bool, str]:
     """Determine risk level and blocking decision based on predictions and age group"""
-    # Get ML scores with defaults
-    default_scores = {"knn": 0.0, "svm": 0.0, "nb": 0.0}
-    ml_scores = predictions.get("ml_scores", default_scores)
+    try:
+        # Get age-specific risk scores
+        kid_unsafe = predictions.get("ml_scores", {}).get("kid_unsafe", 0.0)
+        teen_unsafe = predictions.get("ml_scores", {}).get("teen_unsafe", 0.0)
+        suspicious = predictions.get("ml_scores", {}).get("suspicious", 0.0)
 
-    # Use only valid scores (ignore None, -Infinity, etc)
-    valid_scores = [score for score in ml_scores.values() if isinstance(score, (int, float)) and score >= 0]
-    risk_score = max(valid_scores) if valid_scores else 0.0
+        # Calculate risk score based on age group
+        if age_group == "kid":
+            risk_score = max(kid_unsafe, suspicious * 0.5)
+            high_threshold = 0.7
+            medium_threshold = 0.4
+        elif age_group == "teen":
+            risk_score = max(teen_unsafe, suspicious * 0.3)
+            high_threshold = 0.8
+            medium_threshold = 0.6
+        else:  # adult
+            risk_score = max(teen_unsafe * 0.5, suspicious * 0.2)
+            high_threshold = 0.9
+            medium_threshold = 0.7
 
-    # Risk thresholds based on age group
-    thresholds = {
-        "kid": {"high": 0.7, "medium": 0.4},
-        "teen": {"high": 0.8, "medium": 0.6},
-        "adult": {"high": 0.9, "medium": 0.7}
-    }
+        # Determine risk level and blocking decision
+        if risk_score >= high_threshold:
+            return "High", True, f"High risk content detected (score: {risk_score:.2f})"
+        elif risk_score >= medium_threshold:
+            should_block = age_group == "kid"  # Block medium risk content only for kids
+            return "Medium", should_block, f"Medium risk content (score: {risk_score:.2f})"
+        else:
+            return "Low", False, ""
 
-    current_threshold = thresholds.get(age_group, thresholds["kid"])
-
-    if risk_score >= current_threshold["high"]:
-        return "High", True, f"High risk content detected (score: {risk_score:.2f})"
-    elif risk_score >= current_threshold["medium"]:
-        return "Medium", age_group == "kid", f"Medium risk content (score: {risk_score:.2f})"
-    else:
-        return "Low", False, ""
+    except Exception as e:
+        logging.error(f"Error in determine_risk_level: {e}")
+        return "Unknown", True, "Error determining risk level"  # Fail safe by blocking
 
 def get_domain_age(domain: str) -> Optional[int]:
     """Get the age of a domain in days"""
@@ -231,12 +238,21 @@ async def get_stats():
                 .count()
             risk_dist[risk] = count
 
-        # Get ML metrics (if any models have been trained)
+        # Get ML metrics (if model has been trained)
         ml_metrics = {}
-        if knn_model and svm_model and naive_bayes_model:
-            for name, data in url_model.items():
-                if 'metrics' in data:
-                    ml_metrics[name] = data['metrics']
+        if best_model:
+            # Get metrics from MLMetrics table
+            latest_metrics = db.query(MLMetrics)\
+                .order_by(MLMetrics.timestamp.desc())\
+                .first()
+            
+            if latest_metrics:
+                ml_metrics['model'] = {
+                    'accuracy': latest_metrics.accuracy,
+                    'precision': latest_metrics.precision,
+                    'recall': latest_metrics.recall,
+                    'f1_score': latest_metrics.f1_score
+                }
 
         return {
             "total_sites": total,
@@ -277,16 +293,16 @@ async def check_url(url: str = Form(...), age_group: str = Form("kid")):
                     "category": "Internal",
                     "probability": 0.0,
                     "predictions": {
-                        "model_predictions": {
-                            "knn": 0.0,
-                            "svm": 0.0,
-                            "nb": 0.0
+                        "risk_features": {
+                            "kid_unsafe_score": 0.0,
+                            "teen_unsafe_score": 0.0,
+                            "suspicious_word_count": 0.0
                         }
                     },
                     "ml_scores": {
-                        "knn": 0.0,
-                        "svm": 0.0,
-                        "nb": 0.0
+                        "kid_unsafe": 0.0,
+                        "teen_unsafe": 0.0,
+                        "suspicious": 0.0
                     }
                 }
             else:
@@ -295,47 +311,58 @@ async def check_url(url: str = Form(...), age_group: str = Form("kid")):
                     "risk_level": "Unknown",
                     "category": "Unknown",
                     "probability": 0.0,
-                    "predictions": {},
+                    "predictions": {
+                        "risk_features": {
+                            "kid_unsafe_score": 0.0,
+                            "teen_unsafe_score": 0.0,
+                            "suspicious_word_count": 0.0
+                        }
+                    },
                     "ml_scores": {
-                        "knn": 0.0,
-                        "svm": 0.0,
-                        "nb": 0.0
+                        "kid_unsafe": 0.0,
+                        "teen_unsafe": 0.0,
+                        "suspicious": 0.0
                     }
                 }
         else:
-            # Make prediction with age-based risk assessment
-            if knn_model and svm_model and naive_bayes_model:
-                is_blocked, risk_score, predictions = predict_url(
-                    url,
-                    threshold=0.7 if age_group == "kid" else 0.8,
-                    models_dir='ml/ai/models/',
-                    age_group=age_group
-                )
-
+            # Make prediction with enhanced URL analysis
+            try:
+                prediction = predict_url(url)
+                
                 result = {
-                    "blocked": is_blocked,
-                    "probability": float(risk_score),
-                    "risk_level": predictions.get("risk_level", "Unknown"),
-                    "category": predictions.get("category", "Unknown"),
+                    "blocked": prediction['is_blocked'],
+                    "probability": prediction['confidence'],
+                    "risk_level": "High" if prediction['risk_features']['kid_unsafe_score'] > 0.7 else 
+                                "Medium" if prediction['risk_features']['kid_unsafe_score'] > 0.4 else "Low",
+                    "category": prediction['category'],
                     "url": url,
-                    "predictions": predictions["model_predictions"],
+                    "predictions": {
+                        "risk_features": prediction['risk_features']
+                    },
                     "ml_scores": {
-                        "knn": predictions["model_predictions"].get("knn", 0.0),
-                        "svm": predictions["model_predictions"].get("svm", 0.0),
-                        "nb": predictions["model_predictions"].get("nb", 0.0)
+                        "kid_unsafe": prediction['risk_features']['kid_unsafe_score'],
+                        "teen_unsafe": prediction['risk_features']['teen_unsafe_score'],
+                        "suspicious": float(prediction['risk_features']['suspicious_word_count'])
                     }
                 }
-            else:
+            except Exception as e:
+                logging.error(f"Prediction error: {e}")
                 result = {
                     "blocked": False,
                     "risk_level": "Unknown",
                     "probability": 0.0,
-                    "predictions": {},
+                    "predictions": {
+                        "risk_features": {
+                            "kid_unsafe_score": 0.0,
+                            "teen_unsafe_score": 0.0,
+                            "suspicious_word_count": 0.0
+                        }
+                    },
                     "category": "Unknown",
                     "ml_scores": {
-                        "knn": 0.0,
-                        "svm": 0.0,
-                        "nb": 0.0
+                        "kid_unsafe": 0.0,
+                        "teen_unsafe": 0.0,
+                        "suspicious": 0.0
                     }
                 }
 
@@ -372,9 +399,9 @@ async def check_url(url: str = Form(...), age_group: str = Form("kid")):
         return {
             **result,
             "ml_scores": result.get("ml_scores", {
-                "knn": 0.0,
-                "svm": 0.0,
-                "nb": 0.0
+                "kid_unsafe": 0.0,
+                "teen_unsafe": 0.0,
+                "suspicious": 0.0
             })
         }
 
@@ -498,6 +525,7 @@ async def get_alerts():
     finally:
         db.close()
 
+# Start the server
 if __name__ == "__main__":
     port = 8000
     try:

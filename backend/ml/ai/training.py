@@ -1,10 +1,11 @@
 import numpy as np
 import logging
-from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from sklearn.naive_bayes import GaussianNB
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, make_scorer
 from sklearn.utils import resample
 import pandas as pd
@@ -16,35 +17,43 @@ import json
 import matplotlib.pyplot as plt
 from pathlib import Path
 from urllib.parse import urlparse
+from imblearn.over_sampling import SMOTE
+from sklearn.ensemble import StackingClassifier, VotingClassifier, BaggingClassifier, AdaBoostClassifier
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.decomposition import TruncatedSVD
+from sklearn.pipeline import Pipeline
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.model_selection import cross_val_score
+import optuna
+from optuna.samplers import TPESampler
 
-from .dataset import generate_dataset, extract_url_features, FIXED_FEATURE_COLUMNS
+# Import required functions and variables
+from dataset import generate_dataset, FIXED_FEATURE_COLUMNS
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+class FeatureExtractor(BaseEstimator, TransformerMixin):
+    """Custom feature extractor for URL features"""
+    def __init__(self):
+        self.tfidf = TfidfVectorizer(max_features=100)
+        self.svd = TruncatedSVD(n_components=20)
+
+    def fit(self, X, y=None):
+        self.tfidf.fit(X)
+        self.svd.fit(self.tfidf.transform(X))
+        return self
+
+    def transform(self, X):
+        tfidf_features = self.tfidf.transform(X)
+        svd_features = self.svd.transform(tfidf_features)
+        return svd_features
+
 def balance_dataset(X, y):
-    """Balance dataset using upsampling for minority class"""
-    X_df = pd.DataFrame(X)
-    X_df['target'] = y
-
-    # Separate majority and minority classes
-    majority = X_df[X_df.target == 0]
-    minority = X_df[X_df.target == 1]
-
-    # Upsample minority class
-    minority_upsampled = resample(minority,
-                                  replace=True,
-                                  n_samples=len(majority),
-                                  random_state=42)
-
-    # Combine majority class with upsampled minority class
-    df_balanced = pd.concat([majority, minority_upsampled])
-
-    # Separate features and target
-    y_balanced = df_balanced.target
-    X_balanced = df_balanced.drop('target', axis=1)
-
-    return X_balanced.values, y_balanced.values
+    """Balance dataset using SMOTE"""
+    smote = SMOTE(random_state=42)
+    X_balanced, y_balanced = smote.fit_resample(X, y)
+    return X_balanced, y_balanced
 
 def evaluate_model(y_true, y_pred, model_name):
     """Evaluate model using multiple metrics with enhanced reporting"""
@@ -79,137 +88,52 @@ def evaluate_model(y_true, y_pred, model_name):
         'false_positive_rate': false_positive_rate
     }
 
-def calculate_age_based_risk(predictions, features, age_group, model_weights=None):
-    """
-    Calculate risk level and score based on age group and URL features
+def objective(trial, X_train, y_train):
+    """Optuna objective function for hyperparameter tuning"""
+    # Define hyperparameters to tune
+    model_name = trial.suggest_categorical('model', ['knn', 'svm', 'nb'])
     
-    Args:
-        predictions: Dictionary containing model predictions
-        features: Dictionary of URL features
-        age_group: Age group category ('kid', 'teen', 'adult')
-        model_weights: Dictionary of model weights from cross-validation
+    if model_name == 'knn':
+        n_neighbors = trial.suggest_int('n_neighbors', 3, 15)
+        weights = trial.suggest_categorical('weights', ['uniform', 'distance'])
+        model = KNeighborsClassifier(n_neighbors=n_neighbors, weights=weights)
     
-    Returns:
-        tuple: (risk_level, risk_score)
-    """
-    # Use provided model weights or fallback to default weights
-    if model_weights is None:
-        model_weights = {
-            'knn': 0.3,
-            'svm': 0.4,
-            'nb': 0.3
-        }
-
-    # Age-specific risk modifiers
-    age_modifiers = {
-        'kid': 1.3,    # Increase risk score for kids
-        'teen': 1.1,   # Slightly increase risk for teens
-        'adult': 1.0   # No modification for adults
-    }
-
-    # Calculate weighted average probability
-    weighted_prob = sum(
-        predictions[model]['probability'] * model_weights[model]
-        for model in predictions.keys()
-    )
-
-    # Apply age-specific modifier
-    risk_score = weighted_prob * age_modifiers.get(age_group, 1.0)
-
-    # Determine risk level based on score
-    if risk_score > 0.8:
-        risk_level = 'high'
-    elif risk_score > 0.5:
-        risk_level = 'medium'
-    else:
-        risk_level = 'low'
-
-    return risk_level, min(risk_score, 1.0)  # Cap risk score at 1.0
-
-def load_url_data():
-    """Load URLs from categorized files and combine them"""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-
-    try:
-        # Load safe URLs with proper header and single column format
-        education_urls = pd.read_csv(os.path.join(base_dir, 'education_urls.csv'), names=['url'], header=None)
-        news_urls = pd.read_csv(os.path.join(base_dir, 'news_urls.csv'), names=['url'], header=None)
-
-        # Load unsafe URLs with proper header and single column format
-        gambling_urls = pd.read_csv(os.path.join(base_dir, 'gambling_urls.csv'), names=['url'], header=None)
-        inappropriate_urls = pd.read_csv(os.path.join(base_dir, 'inappropriate_urls.csv'), names=['url'], header=None)
-        malware_urls = pd.read_csv(os.path.join(base_dir, 'malware_urls.csv'), names=['url'], header=None)
-        adult_urls = pd.read_csv(os.path.join(base_dir, 'adult_urls.csv'), names=['url'], header=None)
-
-        # Combine and label safe URLs
-        safe_urls = pd.concat([education_urls, news_urls])
-        safe_urls['is_blocked'] = 0
-        safe_urls['category'] = 'safe'
-
-        # Combine and label unsafe URLs with specific categories
-        gambling_urls['category'] = 'gambling'
-        inappropriate_urls['category'] = 'inappropriate'
-        malware_urls['category'] = 'malware'
-        adult_urls['category'] = 'adult'
-
-        unsafe_urls = pd.concat([gambling_urls, inappropriate_urls, malware_urls, adult_urls])
-        unsafe_urls['is_blocked'] = 1
-
-        # Combine all and shuffle
-        all_urls = pd.concat([safe_urls, unsafe_urls]).reset_index(drop=True)
-        return all_urls.sample(frac=1, random_state=42)
-
-    except FileNotFoundError as e:
-        logging.error(f"File not found: {e}")
-        return pd.DataFrame()
-    except pd.errors.ParserError as e:
-        logging.error(f"CSV parsing error: {e}")
-        return pd.DataFrame()
-    except Exception as e:
-        logging.error(f"An error occurred: {e}")
-        return pd.DataFrame()
+    elif model_name == 'svm':
+        C = trial.suggest_float('C', 0.1, 10.0, log=True)
+        kernel = trial.suggest_categorical('kernel', ['linear', 'rbf', 'poly'])
+        gamma = trial.suggest_categorical('gamma', ['scale', 'auto'])
+        model = SVC(C=C, kernel=kernel, gamma=gamma, probability=True)
+    
+    elif model_name == 'nb':
+        var_smoothing = trial.suggest_float('var_smoothing', 1e-11, 1e-6, log=True)
+        model = GaussianNB(var_smoothing=var_smoothing)
+    
+    # Evaluate model using cross-validation
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    scores = cross_val_score(model, X_train, y_train, cv=cv, scoring='f1')
+    return scores.mean()
 
 def train_models():
-    """Train the ensemble of models for URL classification"""
-    # Define save_dir outside the try block to ensure it's always available
+    """Train the ensemble of models for URL classification with advanced techniques"""
     save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'latest')
     os.makedirs(save_dir, exist_ok=True)
 
     try:
         # Generate and preprocess dataset
         logging.info("Generating dataset...")
-        dataset = generate_dataset()
+        dataset = generate_dataset()  # Now defined or imported
 
-        # Check if the dataset is empty
         if dataset.empty:
             logging.error("Dataset is empty. Check the input CSV files.")
-            return
-
-        # Extract features and target separately
-        # Features are all columns except 'is_blocked'
-        if 'is_blocked' not in dataset.columns:
-            logging.error("'is_blocked' column not found in the dataset.")
             return
 
         X = dataset.drop('is_blocked', axis=1).values
         y = dataset['is_blocked'].values
 
-        # Validate feature dimensions
-        if X.shape[1] != len(FIXED_FEATURE_COLUMNS):
-            raise ValueError(f"Feature dimension mismatch. Expected {len(FIXED_FEATURE_COLUMNS)} features, got {X.shape[1]}")
-
-        # Verify all required feature columns are present
-        if isinstance(dataset, pd.DataFrame):
-            missing_features = set(FIXED_FEATURE_COLUMNS) - set(dataset.columns)
-            if missing_features:
-                raise ValueError(f"Missing required feature columns: {missing_features}")
-
         # Split dataset
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y
-        )
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-        # Balance training data
+        # Balance training data using SMOTE
         X_train_balanced, y_train_balanced = balance_dataset(X_train, y_train)
 
         # Scale features
@@ -217,119 +141,40 @@ def train_models():
         X_train_scaled = scaler.fit_transform(X_train_balanced)
         X_test_scaled = scaler.transform(X_test)
 
-        # Initialize models with hyperparameters
-        models = {
-            'knn': KNeighborsClassifier(n_neighbors=5, weights='distance'),
-            'svm': SVC(kernel='rbf', probability=True, C=1.0),
-            'nb': GaussianNB()
-        }
+        # Use Optuna for hyperparameter tuning
+        logging.info("Starting hyperparameter tuning with Optuna...")
+        study = optuna.create_study(direction='maximize', sampler=TPESampler())
+        study.optimize(lambda trial: objective(trial, X_train_scaled, y_train_balanced), n_trials=50)
 
-        # Enhanced hyperparameter tuning using GridSearchCV
-        param_grid_knn = {
-            'n_neighbors': [3, 5, 7, 9, 11],
-            'weights': ['uniform', 'distance'],
-            'metric': ['euclidean', 'manhattan', 'minkowski'],
-            'p': [1, 2, 3],  # For Minkowski distance
-            'leaf_size': [10, 20, 30, 40]
-        }
+        # Get the best hyperparameters
+        best_params = study.best_params
+        logging.info(f"Best hyperparameters: {best_params}")
 
-        param_grid_svm = {
-            'C': [0.1, 1, 10, 100],
-            'kernel': ['linear', 'rbf', 'poly'],
-            'gamma': ['scale', 'auto', 0.001, 0.01, 0.1],
-            'degree': [2, 3, 4],  # For polynomial kernel
-            'class_weight': ['balanced', None]
-        }
+        # Train the best model
+        if best_params['model'] == 'knn':
+            model = KNeighborsClassifier(
+                n_neighbors=best_params['n_neighbors'],
+                weights=best_params['weights']
+            )
+        elif best_params['model'] == 'svm':
+            model = SVC(
+                C=best_params['C'],
+                kernel=best_params['kernel'],
+                gamma=best_params['gamma'],
+                probability=True
+            )
+        elif best_params['model'] == 'nb':
+            model = GaussianNB(var_smoothing=best_params['var_smoothing'])
 
-        param_grid_nb = {
-            'var_smoothing': np.logspace(-11, -6, num=20)
-        }
+        logging.info(f"Training best model: {best_params['model']}")
+        model.fit(X_train_scaled, y_train_balanced)
 
-        # Custom scoring function that balances precision and recall
-        scoring = {
-            'f1': 'f1',
-            'precision': make_scorer(precision_score, zero_division=0),
-            'recall': make_scorer(recall_score, zero_division=0)
-        }
-
-        grid_search_knn = GridSearchCV(
-            KNeighborsClassifier(), 
-            param_grid_knn, 
-            cv=5, 
-            scoring=scoring,
-            refit='f1',
-            n_jobs=-1  # Use all available cores
-        )
-        
-        grid_search_svm = GridSearchCV(
-            SVC(probability=True), 
-            param_grid_svm, 
-            cv=5, 
-            scoring=scoring,
-            refit='f1',
-            n_jobs=-1
-        )
-        
-        grid_search_nb = GridSearchCV(
-            GaussianNB(), 
-            param_grid_nb, 
-            cv=5, 
-            scoring=scoring,
-            refit='f1',
-            n_jobs=-1
-        )
-
-        # Log start of grid search
-        logging.info("\nStarting Grid Search for optimal hyperparameters...")
-
-        grid_search_knn.fit(X_train_scaled, y_train_balanced)
-        grid_search_svm.fit(X_train_scaled, y_train_balanced)
-        grid_search_nb.fit(X_train_scaled, y_train_balanced)
-
-        # Log best parameters and scores
-        for name, grid_search in [('KNN', grid_search_knn), ('SVM', grid_search_svm), ('NB', grid_search_nb)]:
-            logging.info(f"\n{name} best parameters: {grid_search.best_params_}")
-            logging.info(f"{name} best cross-validation scores:")
-            for metric, scores in grid_search.cv_results_.items():
-                if metric.startswith('mean_test_'):
-                    score_name = metric.replace('mean_test_', '')
-                    score_value = grid_search.cv_results_[metric][grid_search.best_index_]
-                    logging.info(f"{score_name}: {score_value:.4f}")
-
-        best_knn = grid_search_knn.best_estimator_
-        best_svm = grid_search_svm.best_estimator_
-        best_nb = grid_search_nb.best_estimator_
-
-        # Update model weights based on cross-validation scores
-        model_weights = {
-            'knn': grid_search_knn.cv_results_['mean_test_f1'][grid_search_knn.best_index_],
-            'svm': grid_search_svm.cv_results_['mean_test_f1'][grid_search_svm.best_index_],
-            'nb': grid_search_nb.cv_results_['mean_test_f1'][grid_search_nb.best_index_]
-        }
-        
-        # Normalize weights to sum to 1
-        total_weight = sum(model_weights.values())
-        model_weights = {k: v/total_weight for k, v in model_weights.items()}
-        
-        # Save model weights
-        joblib.dump(model_weights, os.path.join(save_dir, 'model_weights.pkl'))
-
-        # Train and evaluate each model
-        trained_models = {}
-        for name, model in [('knn', best_knn), ('svm', best_svm), ('nb', best_nb)]:
-            logging.info(f"\nTraining {name.upper()} model...")
-            model.fit(X_train_scaled, y_train_balanced)
-
-            # Evaluate
-            y_pred = model.predict(X_test_scaled)
-            metrics = evaluate_model(y_test, y_pred, name.upper())
-            trained_models[name] = model
+        # Evaluate the best model
+        y_pred = model.predict(X_test_scaled)
+        metrics = evaluate_model(y_test, y_pred, f"Best Model ({best_params['model']})")
+        joblib.dump(model, os.path.join(save_dir, 'best_model.pkl'))
 
         # Save models and preprocessing objects
-        for name, model in trained_models.items():
-            joblib.dump(model, os.path.join(save_dir, f'{name}_model.pkl'))
-
-        # Save scaler and feature columns
         joblib.dump(scaler, os.path.join(save_dir, 'url_scaler.pkl'))
         joblib.dump(FIXED_FEATURE_COLUMNS, os.path.join(save_dir, 'feature_cols.pkl'))
 
@@ -339,430 +184,80 @@ def train_models():
         logging.error(f"Error during model training: {e}")
         raise
 
-def predict_url(url, threshold=0.65, models_dir=None, age_group='kid'):
+def predict_url(url):
     """
-    Make prediction for a single URL using ensemble of models
+    Predict URL safety information using the trained model
+    
     Args:
-        url: URL to analyze
-        threshold: Classification threshold (default: 0.65)
-        models_dir: Directory containing trained models
-        age_group: Age group for risk assessment
+        url (str): The URL to classify
+        
     Returns:
-        tuple: (is_unsafe, probability, risk_score)
+        dict: Dictionary containing:
+            - is_blocked (bool): Whether the URL should be blocked
+            - confidence (float): Prediction confidence score
+            - risk_features (dict): Dictionary of risk features like:
+                - kid_unsafe_score
+                - teen_unsafe_score
+                - suspicious_word_count
+                - has_malicious_content
+            - category (str): Predicted category (e.g., 'safe', 'adult', 'malware', etc.)
     """
     try:
-        # Use global models, scaler, and weights
-        global knn_model, svm_model, naive_bayes_model, url_scaler, feature_cols, model_weights
-
-        # Extract features
-        features = extract_url_features(url)
-        if not features:
-            raise ValueError("Failed to extract features from URL")
-
-        # Ensure features are a list of values
-        if isinstance(features, dict):
-            features = list(features.values())
-
-        # Ensure features array matches expected features
-        if len(features) != len(feature_cols):
-            logging.error(f"Mismatch in feature length: Expected {len(feature_cols)} features, got {len(features)}")
-            logging.error(f"Feature columns: {feature_cols}")
-            logging.error(f"Extracted features: {features}")
-            raise ValueError(f"Expected {len(feature_cols)} features, got {len(features)}")
-
-        # Validate feature names match expected columns
-        if isinstance(features, dict):
-            expected_features = set(feature_cols)
-            actual_features = set(features.keys())
-            if expected_features != actual_features:
-                missing = expected_features - actual_features
-                extra = actual_features - expected_features
-                raise ValueError(
-                    f"Feature mismatch. Missing: {missing}, Extra: {extra}"
-                )
-
+        model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'latest')
+        
+        # Load the saved model and preprocessing objects
+        model = joblib.load(os.path.join(model_dir, 'best_model.pkl'))
+        scaler = joblib.load(os.path.join(model_dir, 'url_scaler.pkl'))
+        feature_cols = joblib.load(os.path.join(model_dir, 'feature_cols.pkl'))
+        
+        # Extract features using the same logic as in dataset.py
+        from .dataset import extract_url_features
+        features_dict = extract_url_features(url)
+        
+        # Convert features dict to list in the same order as feature_cols
+        features = [features_dict[col] for col in feature_cols]
+        
         # Scale features
-        features_array = np.array(features).reshape(1, -1)
-        features_scaled = url_scaler.transform(features_array)
-
-        # Get predictions and probabilities
-        predictions = {}
-
-        # KNN
-        knn_prob = knn_model.predict_proba(features_scaled)[0][1]
-        predictions['knn'] = {
-            'prediction': knn_prob > threshold,
-            'probability': knn_prob
+        features_scaled = scaler.transform([features])
+        
+        # Make prediction with probability
+        is_blocked = bool(model.predict(features_scaled)[0])
+        
+        # Get prediction probability
+        prob = model.predict_proba(features_scaled)[0]
+        confidence = float(prob[1] if is_blocked else prob[0])
+        
+        # Extract relevant risk features
+        risk_features = {
+            'kid_unsafe_score': float(features_dict['kid_unsafe_score']),
+            'teen_unsafe_score': float(features_dict['teen_unsafe_score']),
+            'suspicious_word_count': float(features_dict['suspicious_word_count']),
+            'has_malicious_content': bool(features_dict['has_suspicious_words'])
         }
-
-        # SVM
-        svm_prob = svm_model.predict_proba(features_scaled)[0][1]
-        predictions['svm'] = {
-            'prediction': svm_prob > threshold,
-            'probability': svm_prob
-        }
-
-        # Naive Bayes
-        nb_prob = naive_bayes_model.predict_proba(features_scaled)[0][1]
-        predictions['nb'] = {
-            'prediction': nb_prob > threshold,
-            'probability': nb_prob
-        }
-
-        # Calculate base risk from model predictions
-        base_features = extract_url_features(url) if isinstance(url, str) else dict(zip(feature_cols, features))
-
-        # Trust factors (reduce risk score)
-        trust_score = 1.0
-        if base_features.get('has_https', 0) == 1:
-            trust_score *= 0.7  # Significant trust for HTTPS
-
-        # Check for trusted domains
-        domain = urlparse(url).netloc.lower()
-        trusted_domains = {'github.com', 'python.org', 'wikipedia.org'}
-        if any(td in domain for td in trusted_domains):
-            trust_score *= 0.5  # High trust for known good domains
-
-        # Risk factors (increase risk score)
-        risk_multiplier = 1.0
-        if base_features.get('is_ip_address', 0) == 1:
-            risk_multiplier *= 2.0  # Major increase for IP-based URLs
-        if base_features.get('suspicious_word_count', 0) > 2:
-            risk_multiplier *= 1.5  # Increase for multiple suspicious words
-        if base_features.get('suspicious_tld', 0) == 1:
-            risk_multiplier *= 1.8  # Increase for suspicious TLDs
-
-        # Calculate age-specific thresholds
-        age_thresholds = {
-            'kid': 0.5,    # More strict for kids
-            'teen': 0.6,   # Moderate for teens
-            'adult': 0.7   # More lenient for adults
-        }
-        effective_threshold = age_thresholds.get(age_group, threshold)
-
-        # Get base risk score from models using dynamically loaded weights
-        risk_level, risk_score = calculate_age_based_risk(
-            predictions,
-            base_features,
-            age_group,
-            model_weights
-        )
-
-        # Apply trust and risk modifiers
-        final_risk_score = (risk_score * risk_multiplier * trust_score)
-
-        # Ensure score stays in [0,1] range
-        final_risk_score = max(0.0, min(1.0, final_risk_score))
-
-        # Update risk level based on final score
-        if final_risk_score > 0.8:
-            risk_level = 'high'
-        elif final_risk_score > 0.5:
-            risk_level = 'medium'
-        else:
-            risk_level = 'low'
-
-        # Enhanced result with age-specific risk assessment
-        result = {
-            'is_unsafe': bool(final_risk_score > effective_threshold),
-            'risk_score': final_risk_score,
-            'risk_level': risk_level,
-            'age_group': age_group,
-            'model_predictions': predictions
-        }
-
-        # Visualize the predictions
-        plt.figure(figsize=(8, 6))
-        plt.bar(['Risk Score'], [final_risk_score])
-        plt.title('Risk Score for URL')
-        plt.ylim(0, 1)
-        plt.ylabel('Risk Score')
-        plt.show()
-
-        # Determine category based on features and predictions
-        domain = urlparse(url).netloc.lower()
-
-        # Convert URL to lowercase for comparison
-        url_lower = url.lower()
-
-        # Special case for localhost URLs
-        if domain.startswith('localhost'):
-            # Check path for category hints
-            if '/dashboard' in url_lower:
-                determined_category = 'Dashboard'
+        
+        # Determine category based on features
+        category = 'safe'
+        if is_blocked:
+            if features_dict['kid_unsafe_score'] > 0.7:
+                category = 'adult'
+            elif features_dict['has_executable'] > 0:
+                category = 'malware'
+            elif features_dict['suspicious_word_count'] > 5:
+                category = 'inappropriate'
+            elif features_dict['has_suspicious_params'] > 0:
+                category = 'suspicious'
             else:
-                determined_category = 'Local'
-            result['category'] = determined_category
-            result['risk_level'] = 'Low'  # Local URLs are generally safe
-            return result['is_unsafe'], result['risk_score'], result
-
-        # Initialize category mapping with more comprehensive patterns
-        categories = {
-            'education': ['edu', 'school', 'university', 'learn', 'course', 'tutorial', 'study'],
-            'entertainment': ['youtube.com', 'netflix.com', 'games', 'music', 'movie', 'video', 'stream'],
-            'social': ['facebook.com', 'twitter.com', 'instagram.com', 'social', '/notifications', '/feed', '/posts'],
-            'news': ['news', 'bbc.com', 'cnn.com', 'reuters.com', 'article', 'blog'],
-            'shopping': ['amazon.com', 'ebay.com', 'shop', 'store', 'cart', 'checkout', 'product'],
-            'adult': ['adult', 'xxx', 'porn', 'nsfw'],
-            'gambling': ['casino', 'bet', 'poker', 'gambling', 'lottery'],
-            'malware': ['malware', 'virus', 'hack', 'trojan', 'worm'],
-            'professional': ['linkedin', 'indeed', 'glassdoor', 'jobs', 'career', 'resume']
+                category = 'blocked'
+        
+        return {
+            'is_blocked': is_blocked,
+            'confidence': confidence,
+            'risk_features': risk_features,
+            'category': category
         }
-
-        # Special case for LinkedIn
-        if 'linkedin.com' in domain:
-            result['category'] = 'Professional'
-            result['risk_level'] = 'Low'  # LinkedIn is a trusted platform
-            return result['is_unsafe'], result['risk_score'], result
-
-        # Determine category with confidence threshold
-        determined_category = 'Unknown'
-        url_lower = url.lower()
-        max_confidence = 0.0
-        best_category = 'Unknown'
-
-        # Calculate confidence scores for each category
-        category_scores = {}
-        for category, keywords in categories.items():
-            score = sum(keyword in url_lower for keyword in keywords)
-            category_scores[category] = score
-            if score > max_confidence:
-                max_confidence = score
-                best_category = category.capitalize()
-
-        # Only assign category if confidence is above threshold
-        confidence_threshold = 2  # At least 2 strong matches
-        if max_confidence >= confidence_threshold:
-            determined_category = best_category
-        else:
-            # For low confidence, use domain-based fallback
-            domain_parts = domain.split('.')
-            if len(domain_parts) > 1:
-                tld = domain_parts[-1]
-                if tld in ['edu', 'gov']:
-                    determined_category = 'Education' if tld == 'edu' else 'Government'
-                elif tld in ['org', 'net']:
-                    determined_category = 'Organization'
-                else:
-                    determined_category = 'General'
-
-        result['category'] = determined_category
-
-        # Adjust risk level for unknown categories
-        if determined_category == 'Unknown':
-            result['risk_level'] = 'Medium'  # Default to medium risk for unknown
-            result['risk_score'] = min(result['risk_score'] * 1.2, 1.0)  # Slightly increase risk
-
-        return result['is_unsafe'], result['risk_score'], result
-
+        
     except Exception as e:
-        logging.error(f"Error during ensemble prediction: {e}")
-        raise
-
-        # Extract features
-        features = extract_url_features(url)
-        if not features:
-            raise ValueError("Failed to extract features from URL")
-
-        # Ensure features are a list of values
-        if isinstance(features, dict):
-            features = list(features.values())
-
-        # Ensure features array matches expected features
-        if len(features) != len(feature_cols):
-            logging.error(f"Mismatch in feature length: Expected {len(feature_cols)} features, got {len(features)}")
-            logging.error(f"Feature columns: {feature_cols}")
-            logging.error(f"Extracted features: {features}")
-            raise ValueError(f"Expected {len(feature_cols)} features, got {len(features)}")
-            
-        # Validate feature names match expected columns
-        if isinstance(features, dict):
-            expected_features = set(feature_cols)
-            actual_features = set(features.keys())
-            if expected_features != actual_features:
-                missing = expected_features - actual_features
-                extra = actual_features - expected_features
-                raise ValueError(
-                    f"Feature mismatch. Missing: {missing}, Extra: {extra}"
-                )
-
-        # Scale features
-        features_array = np.array(features).reshape(1, -1)
-        features_scaled = scaler.transform(features_array)
-
-        # Get predictions and probabilities
-        predictions = {}
-
-        # KNN
-        knn_prob = knn.predict_proba(features_scaled)[0][1]
-        predictions['knn'] = {
-            'prediction': knn_prob > threshold,
-            'probability': knn_prob
-        }
-
-        # SVM
-        svm_prob = svm.predict_proba(features_scaled)[0][1]
-        predictions['svm'] = {
-            'prediction': svm_prob > threshold,
-            'probability': svm_prob
-        }
-
-        # Naive Bayes
-        nb_prob = nb.predict_proba(features_scaled)[0][1]
-        predictions['nb'] = {
-            'prediction': nb_prob > threshold,
-            'probability': nb_prob
-        }
-
-        # Calculate base risk from model predictions
-        base_features = extract_url_features(url) if isinstance(url, str) else dict(zip(feature_cols, features))
-        
-        # Trust factors (reduce risk score)
-        trust_score = 1.0
-        if base_features.get('has_https', 0) == 1:
-            trust_score *= 0.7  # Significant trust for HTTPS
-        
-        # Check for trusted domains
-        domain = urlparse(url).netloc.lower()
-        trusted_domains = {'github.com', 'python.org', 'wikipedia.org'}
-        if any(td in domain for td in trusted_domains):
-            trust_score *= 0.5  # High trust for known good domains
-            
-        # Risk factors (increase risk score)
-        risk_multiplier = 1.0
-        if base_features.get('is_ip_address', 0) == 1:
-            risk_multiplier *= 2.0  # Major increase for IP-based URLs
-        if base_features.get('suspicious_word_count', 0) > 2:
-            risk_multiplier *= 1.5  # Increase for multiple suspicious words
-        if base_features.get('suspicious_tld', 0) == 1:
-            risk_multiplier *= 1.8  # Increase for suspicious TLDs
-            
-        # Calculate age-specific thresholds
-        age_thresholds = {
-            'kid': 0.5,    # More strict for kids
-            'teen': 0.6,   # Moderate for teens
-            'adult': 0.7   # More lenient for adults
-        }
-        effective_threshold = age_thresholds.get(age_group, threshold)
-        
-        # Get base risk score from models using dynamically loaded weights
-        risk_level, risk_score = calculate_age_based_risk(
-            predictions,
-            base_features,
-            age_group,
-            model_weights
-        )
-        
-        # Apply trust and risk modifiers
-        final_risk_score = (risk_score * risk_multiplier * trust_score)
-        
-        # Ensure score stays in [0,1] range
-        final_risk_score = max(0.0, min(1.0, final_risk_score))
-
-        # Update risk level based on final score
-        if final_risk_score > 0.8:
-            risk_level = 'high'
-        elif final_risk_score > 0.5:
-            risk_level = 'medium'
-        else:
-            risk_level = 'low'
-
-        # Enhanced result with age-specific risk assessment
-        result = {
-            'is_unsafe': bool(final_risk_score > effective_threshold),
-            'risk_score': final_risk_score,
-            'risk_level': risk_level,
-            'age_group': age_group,
-            'model_predictions': predictions
-        }
-
-        # Visualize the predictions
-        plt.figure(figsize=(8, 6))
-        plt.bar(['Risk Score'], [final_risk_score])
-        plt.title('Risk Score for URL')
-        plt.ylim(0, 1)
-        plt.ylabel('Risk Score')
-        plt.show()
-
-        # Determine category based on features and predictions
-        domain = urlparse(url).netloc.lower()
-        
-        # Convert URL to lowercase for comparison
-        url_lower = url.lower()
-        
-        # Special case for localhost URLs
-        if domain.startswith('localhost'):
-            # Check path for category hints
-            if '/dashboard' in url_lower:
-                determined_category = 'Dashboard'
-            else:
-                determined_category = 'Local'
-            result['category'] = determined_category
-            result['risk_level'] = 'Low'  # Local URLs are generally safe
-            return result['is_unsafe'], result['risk_score'], result
-
-
-        # Initialize category mapping with more comprehensive patterns
-        categories = {
-            'education': ['edu', 'school', 'university', 'learn', 'course', 'tutorial', 'study'],
-            'entertainment': ['youtube.com', 'netflix.com', 'games', 'music', 'movie', 'video', 'stream'],
-            'social': ['facebook.com', 'twitter.com', 'instagram.com', 'social', '/notifications', '/feed', '/posts'],
-            'news': ['news', 'bbc.com', 'cnn.com', 'reuters.com', 'article', 'blog'],
-            'shopping': ['amazon.com', 'ebay.com', 'shop', 'store', 'cart', 'checkout', 'product'],
-            'adult': ['adult', 'xxx', 'porn', 'nsfw'],
-            'gambling': ['casino', 'bet', 'poker', 'gambling', 'lottery'],
-            'malware': ['malware', 'virus', 'hack', 'trojan', 'worm'],
-            'professional': ['linkedin', 'indeed', 'glassdoor', 'jobs', 'career', 'resume']
-        }
-
-        # Special case for LinkedIn
-        if 'linkedin.com' in domain:
-            result['category'] = 'Professional'
-            result['risk_level'] = 'Low'  # LinkedIn is a trusted platform
-            return result['is_unsafe'], result['risk_score'], result
-        
-        # Determine category with confidence threshold
-        determined_category = 'Unknown'
-        url_lower = url.lower()
-        max_confidence = 0.0
-        best_category = 'Unknown'
-        
-        # Calculate confidence scores for each category
-        category_scores = {}
-        for category, keywords in categories.items():
-            score = sum(keyword in url_lower for keyword in keywords)
-            category_scores[category] = score
-            if score > max_confidence:
-                max_confidence = score
-                best_category = category.capitalize()
-        
-        # Only assign category if confidence is above threshold
-        confidence_threshold = 2  # At least 2 strong matches
-        if max_confidence >= confidence_threshold:
-            determined_category = best_category
-        else:
-            # For low confidence, use domain-based fallback
-            domain_parts = domain.split('.')
-            if len(domain_parts) > 1:
-                tld = domain_parts[-1]
-                if tld in ['edu', 'gov']:
-                    determined_category = 'Education' if tld == 'edu' else 'Government'
-                elif tld in ['org', 'net']:
-                    determined_category = 'Organization'
-                else:
-                    determined_category = 'General'
-        
-        result['category'] = determined_category
-        
-        # Adjust risk level for unknown categories
-        if determined_category == 'Unknown':
-            result['risk_level'] = 'Medium'  # Default to medium risk for unknown
-            result['risk_score'] = min(result['risk_score'] * 1.2, 1.0)  # Slightly increase risk
-        
-        return result['is_unsafe'], result['risk_score'], result
-
-    except Exception as e:
-        logging.error(f"Error during ensemble prediction: {e}")
+        logging.error(f"Error during URL prediction: {e}")
         raise
 
 if __name__ == "__main__":

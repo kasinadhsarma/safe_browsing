@@ -37,7 +37,7 @@ const fetchActivities = async () => {
       } catch {
         timestamp = new Date().toISOString();
       }
-      
+
       return {
         ...activity,
         timestamp,
@@ -54,6 +54,17 @@ const fetchActivities = async () => {
     setError('Failed to fetch activities. Please try again.');
   } finally {
     setIsLoading(false);
+  }
+};
+
+const checkUrl = async (url: string, age_group: string) => {
+  try {
+    console.log(`Checking URL: ${url} for age group: ${age_group}`);
+    const result = await urlService.checkUrl(url, age_group);
+    console.log('URL check result:', result);
+    // Handle the result as needed
+  } catch (error) {
+    console.error('Error checking URL:', error);
   }
 };
 
