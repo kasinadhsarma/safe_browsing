@@ -148,11 +148,11 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
         if (!settings.blockingEnabled) return;
 
         const result = await checkUrl(details.url);
-        
+
         if (result.blocked) {
             // Redirect to blocked page
             chrome.tabs.update(details.tabId, {
-                url: chrome.runtime.getURL('src/blocked.html') + 
+                url: chrome.runtime.getURL('src/blocked.html') +
                      `?url=${encodeURIComponent(details.url)}` +
                      `&category=${encodeURIComponent(result.category || 'Unknown')}` +
                      `&risk_level=${encodeURIComponent(result.risk_level || 'High')}` +

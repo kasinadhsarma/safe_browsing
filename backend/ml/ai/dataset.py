@@ -53,31 +53,39 @@ def load_url_data():
         safe_urls = []
         for file in safe_files:
             file_path = os.path.join(base_dir, file)
-            if os.path.exists(file_path):
-                df = pd.read_csv(file_path, names=['url'], header=None)
-                df['is_blocked'] = 0
-                df['category'] = 'safe'
-                safe_urls.append(df)
+            df = pd.read_csv(file_path)
+            df['target'] = 0  # Label for safe URLs
+            safe_urls.append(df)
+            logging.info(f"Loaded {len(df)} safe URLs from {file}")
 
         unsafe_urls = []
         for file in unsafe_files:
             file_path = os.path.join(base_dir, file)
-            if os.path.exists(file_path):
-                df = pd.read_csv(file_path, names=['url'], header=None)
-                df['category'] = file.split('_')[0]
-                df['is_blocked'] = 1
-                unsafe_urls.append(df)
+            df = pd.read_csv(file_path)
+            df['target'] = 1  # Label for unsafe URLs
+            unsafe_urls.append(df)
+            logging.info(f"Loaded {len(df)} unsafe URLs from {file}")
 
         if not safe_urls and not unsafe_urls:
-            logging.error("No data found in any files.")
-            return pd.DataFrame()
+            logging.error("No URLs loaded from the provided files.")
+            return pd.DataFrame(), pd.Series()
 
         all_urls = pd.concat(safe_urls + unsafe_urls, ignore_index=True)
-        return all_urls.sample(frac=1, random_state=42)
+        all_urls = all_urls.sample(frac=1, random_state=42)  # Shuffle the dataset
+
+        logging.info(f"Combined dataset has {len(all_urls)} samples.")
+
+        X = all_urls.drop('target', axis=1)
+        y = all_urls['target']
+
+        logging.info(f"Dataset features: {X.columns.tolist()}")
+        logging.info(f"Dataset labels: {y.value_counts().to_dict()}")
+
+        return X, y
 
     except Exception as e:
         logging.error(f"Error loading data: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.Series()
 
 def calculate_entropy(text):
     """Calculate Shannon entropy of text."""
@@ -112,7 +120,7 @@ SUSPICIOUS_PATTERNS = {
     'malware': r'(malware|virus|trojan|spyware|ransomware|backdoor|exploit|worm)',
     'phishing': r'(login|verify|account|secure|banking|password|credential)',
     'scam': r'(prize|winner|lottery|casino|free\s*money|discount|deal)',
-    'adult': r'(xxx|porn|adult|sex|mature|escort)',
+    'adult': r'(xxx|porn|adult|sex|mature|escort|brazzers|pornhub|xvideos|xnxx|nude|nsfw)',
     'drugs': r'(drug|pharma|pill|medication|prescription)',
     'weapons': r'(weapon|gun|ammo|explosive)',
     'hacking': r'(hack|crack|keygen|serial|warez|leaked|dump)'
@@ -166,12 +174,16 @@ def get_page_content(url):
         return ""
 
 def analyze_url_safety(url, content=""):
-    """Quick safety analysis."""
+    """Quick safety analysis with enhanced adult content detection"""
     scores = {}
     for category, pattern in SUSPICIOUS_PATTERNS.items():
         url_matches = len(re.findall(pattern, url.lower()))
         content_matches = len(re.findall(pattern, content.lower())) if content else 0
-        scores[category] = (url_matches * 2 + content_matches) / (2 if content else 1)
+        
+        # Increase weight for adult content matches
+        multiplier = 2.0 if category == 'adult' else 1.0
+        scores[category] = ((url_matches * 2 + content_matches) * multiplier) / (2 if content else 1)
+    
     return scores
 
 def extract_url_features(url):
@@ -226,7 +238,7 @@ def extract_url_features(url):
         # Safety analysis
         content = get_page_content(url)
         safety_scores = analyze_url_safety(url, content)
-        
+
         features.update({
             'page_text_length': float(len(content)),
             'page_entropy': float(calculate_entropy(content)),
@@ -237,6 +249,8 @@ def extract_url_features(url):
             feature_name = f'{category}_score'
             if feature_name in features:
                 features[feature_name] = float(score)
+
+        logging.info(f"Extracted features for {url}: {features}")
 
         return features
     except Exception as e:

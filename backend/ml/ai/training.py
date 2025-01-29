@@ -1,221 +1,268 @@
-import pandas as pd
-import numpy as np
 import logging
 import os
-import joblib
-from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold 
+import sys
+from pathlib import Path
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from sklearn.naive_bayes import GaussianNB
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from sklearn.ensemble import VotingClassifier
-from imblearn.over_sampling import SMOTE
-from .dataset import load_url_data, process_urls_parallel, FIXED_FEATURE_COLUMNS, extract_url_features
-from tqdm import tqdm
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.utils import resample
+import joblib
+from urllib.parse import urlparse
+from .dataset import load_url_data, extract_url_features, process_urls_parallel
+from .metrics import MLMetrics
+from datetime import datetime
+from .metrics import SessionLocal
+
+# Add the project root to the Python path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def balance_dataset(X, y):
-    """Balance dataset using SMOTE."""
-    smote = SMOTE(random_state=42, n_jobs=-1)  # Use all CPU cores
-    X_balanced, y_balanced = smote.fit_resample(X, y)
+    """Balance dataset using upsampling for minority class"""
+    X_df = pd.DataFrame(X)
+    X_df['target'] = y
+
+    # Separate majority and minority classes
+    majority = X_df[X_df.target == 0]
+    minority = X_df[X_df.target == 1]
+
+    # Upsample minority class
+    minority_upsampled = resample(minority,
+                                replace=True,
+                                n_samples=len(majority),
+                                random_state=42)
+
+    # Combine majority and upsampled minority
+    balanced_df = pd.concat([majority, minority_upsampled])
+    X_balanced = balanced_df.drop('target', axis=1)
+    y_balanced = balanced_df['target'].values
     return X_balanced, y_balanced
 
 def evaluate_model(y_true, y_pred, model_name):
-    """Evaluate model metrics."""
-    accuracy = accuracy_score(y_true, y_pred)
-    precision = precision_score(y_true, y_pred, zero_division=0)
-    recall = recall_score(y_true, y_pred, zero_division=0)
-    f1 = f1_score(y_true, y_pred, zero_division=0)
-
-    # Calculate rates
-    true_positives = sum((y_true == 1) & (y_pred == 1))
-    false_positives = sum((y_true == 0) & (y_pred == 1))
-    false_negatives = sum((y_true == 1) & (y_pred == 0))
-    
-    detection_rate = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
-    false_positive_rate = false_positives / (false_positives + sum(y_true == 0)) if (false_positives + sum(y_true == 0)) > 0 else 0
-
-    logging.info(f"\n{model_name} Metrics:")
-    logging.info(f"Accuracy: {accuracy:.4f}")
-    logging.info(f"Precision: {precision:.4f}")
-    logging.info(f"Recall: {recall:.4f}")
-    logging.info(f"F1 Score: {f1:.4f}")
-    logging.info(f"Detection Rate: {detection_rate:.4f}")
-    logging.info(f"False Positive Rate: {false_positive_rate:.4f}")
-
-    return {
-        'accuracy': accuracy,
-        'precision': precision,
-        'recall': recall,
-        'f1': f1,
-        'detection_rate': detection_rate,
-        'false_positive_rate': false_positive_rate
+    """Evaluate model and plot metrics"""
+    metrics = {
+        'Accuracy': accuracy_score(y_true, y_pred),
+        'Precision': precision_score(y_true, y_pred, zero_division=0),
+        'Recall': recall_score(y_true, y_pred, zero_division=0),
+        'F1 Score': f1_score(y_true, y_pred, zero_division=0)
     }
 
-def predict_url(url):
-    """Predict URL safety using trained models."""
-    try:
-        model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'latest')
-        
-        # Load models and preprocessing objects
-        scaler = joblib.load(os.path.join(model_dir, 'url_scaler.pkl'))
-        feature_cols = joblib.load(os.path.join(model_dir, 'feature_cols.pkl'))
-        
-        # Load individual models
-        models = {
-            'knn': joblib.load(os.path.join(model_dir, 'knn_model.pkl')),
-            'svm': joblib.load(os.path.join(model_dir, 'svm_model.pkl')),
-            'nb': joblib.load(os.path.join(model_dir, 'nb_model.pkl'))
-        }
-        
-        # Extract features and ensure feature names are preserved
-        features_dict = extract_url_features(url)
-        # Create DataFrame with feature names to maintain column order
-        features_df = pd.DataFrame([features_dict], columns=feature_cols)
-        # Scale features and maintain DataFrame structure
-        features_scaled = pd.DataFrame(
-            scaler.transform(features_df),
-            columns=feature_cols
-        )
-        
-        # Get predictions from each model
-        predictions = {}
-        for name, model in models.items():
-            # Get predictions maintaining feature names
-            proba = model.predict_proba(features_scaled.values)[0]
-            predictions[name] = {
-                'is_unsafe': bool(model.predict(features_scaled.values)[0]),
-                'probability': float(proba[1])  # Probability of unsafe class
-            }
-        
-        # Weight predictions based on model reliability
-        weights = {'knn': 0.25, 'svm': 0.45, 'nb': 0.30}
-        weighted_probability = sum(
-            pred['probability'] * weights[name] 
-            for name, pred in predictions.items()
-        )
-        
-        # Overall safety assessment
-        is_unsafe = weighted_probability > 0.45  # Lower threshold for better detection
-        
-        return predictions, is_unsafe, weighted_probability
-        
-    except Exception as e:
-        logging.error(f"Error during URL prediction: {e}")
-        raise
+    return metrics
 
-def train_models():
-    """Train models with parallel feature extraction."""
-    save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'latest')
+def calculate_age_based_risk(predictions, features, age_group='kid'):
+    """Calculate risk level and score based on age group and features"""
+    # Base weights for different models based on their performance
+    model_weights = {
+        'knn': 0.3,
+        'svm': 0.4,
+        'nb': 0.3
+    }
+
+    # Calculate weighted average of model predictions
+    weighted_score = sum(pred['probability'] * model_weights[model]
+                        for model, pred in predictions.items())
+
+    # Age-specific risk modifiers
+    age_risk_multipliers = {
+        'kid': 1.5,    # More strict for kids
+        'teen': 1.2,   # Moderately strict for teens
+        'adult': 1.0   # Base level for adults
+    }
+
+    # Apply age-specific risk multiplier
+    risk_score = min(1.0, weighted_score * age_risk_multipliers.get(age_group, 1.0))
+
+    # Determine risk level
+    if risk_score > 0.8:
+        risk_level = 'high'
+    elif risk_score > 0.5:
+        risk_level = 'medium'
+    else:
+        risk_level = 'low'
+
+    return risk_level, risk_score
+
+def predict_url(url, threshold=0.65, models_dir=None, age_group='kid'):
+    """Make prediction for a single URL using ensemble of models"""
+    # Add automatic adult content blocking
+    parsed_url = urlparse(url)
+    domain = parsed_url.netloc.lower()
+
+    # List of known adult domains
+    adult_domains = {
+        'brazzers.com', 'pornhub.com', 'xvideos.com', 'xnxx.com',
+        'youporn.com', 'redtube.com', 'xhamster.com'
+    }
+
+    # Block adult content for kids automatically
+    if any(adult in domain for adult in adult_domains):
+        if age_group == 'kid':
+            return True, 1.0, 'high'
+        elif age_group == 'teen':
+            return True, 0.8, 'medium'
+        else:  # adult
+            return True, 0.6, 'low'
+
+    # Handle internal URLs and trusted domains
+    if parsed_url.scheme in ['chrome', 'about', 'file']:
+        return False, 0.1, 'low'
+
+    trusted_domains = {
+        'youtube.com', 'linkedin.com', 'github.com',
+        'python.org', 'wikipedia.org', 'google.com'
+    }
+    if any(td in domain for td in trusted_domains):
+        return False, 0.3, 'low'
+
+    try:
+        if models_dir is None:
+            models_dir = os.path.join(os.path.dirname(__file__), '..', 'models', 'latest')
+
+        # Load models and scaler
+        scaler = joblib.load(os.path.join(models_dir, 'url_scaler.pkl'))
+        knn_model = joblib.load(os.path.join(models_dir, 'knn_model.pkl'))
+        svm_model = joblib.load(os.path.join(models_dir, 'svm_model.pkl'))
+        nb_model = joblib.load(os.path.join(models_dir, 'naive_bayes_model.pkl'))
+        feature_cols = joblib.load(os.path.join(models_dir, 'feature_cols.pkl'))
+
+        # Extract and prepare features
+        features = extract_url_features(url)
+        if isinstance(features, dict):
+            features = list(features.values())
+
+        features_array = np.array(features).reshape(1, -1)
+        features_scaled = scaler.transform(features_array)
+
+        # Get individual model predictions
+        knn_prob = knn_model.predict_proba(features_scaled)[0][1]
+        svm_prob = svm_model.predict_proba(features_scaled)[0][1]
+        nb_prob = nb_model.predict_proba(features_scaled)[0][1]
+
+        # Calculate weighted average
+        weighted_score = (knn_prob * 0.3) + (svm_prob * 0.4) + (nb_prob * 0.3)
+
+        # Calculate age-based risk
+        age_risk_level, age_risk_score = calculate_age_based_risk(
+            predictions={
+                'knn': {'probability': knn_prob},
+                'svm': {'probability': svm_prob},
+                'nb': {'probability': nb_prob}
+            },
+            features=features,
+            age_group=age_group
+        )
+
+        is_unsafe = weighted_score >= threshold
+        risk_level = age_risk_level
+        risk_score = age_risk_score
+
+        return is_unsafe, risk_score, risk_level
+
+    except Exception as e:
+        logging.error(f"Error in predict_url: {e}")
+        return False, 0.5, 'medium'
+
+def train_models(save_dir: str):
+    """Train ML models and save them to the specified directory."""
+    logging.info("Loading dataset...")
+    X, y = load_url_data()
+
+    # Check if the dataset is empty
+    if X.empty or y.empty:
+        logging.error("The dataset is empty. Cannot train models.")
+        return
+
+    logging.info(f"Dataset loaded with {len(X)} samples and {len(y)} labels.")
+
+    # If 'url' is needed for any reason, ensure it's present
+    if 'url' not in X.columns:
+        logging.error("'url' column is missing from the feature set.")
+        return
+
+    urls = X['url'].tolist()  # Replace 'data' with 'X'
+
+    # Extract features for each URL
+    logging.info("Extracting features for URLs...")
+    features = process_urls_parallel(urls)
+    X = pd.DataFrame(features)
+
+    # Feature Scaling
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    # Split the dataset
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_scaled, y, test_size=0.2, random_state=42
+    )
+
+    # Initialize models
+    knn = KNeighborsClassifier()
+    svm = SVC(probability=True)
+    nb = GaussianNB()
+
+    # Train KNN
+    logging.info("Training KNN model...")
+    knn.fit(X_train, y_train)
+    knn_pred = knn.predict(X_test)
+    knn_acc = accuracy_score(y_test, knn_pred)
+    logging.info(f"KNN Accuracy: {knn_acc:.4f}")
+
+    # Train SVM
+    logging.info("Training SVM model...")
+    svm.fit(X_train, y_train)
+    svm_pred = svm.predict(X_test)
+    svm_acc = accuracy_score(y_test, svm_pred)
+    logging.info(f"SVM Accuracy: {svm_acc:.4f}")
+
+    # Train Naive Bayes
+    logging.info("Training Naive Bayes model...")
+    nb.fit(X_train, y_train)
+    nb_pred = nb.predict(X_test)
+    nb_acc = accuracy_score(y_test, nb_pred)
+    logging.info(f"Naive Bayes Accuracy: {nb_acc:.4f}")
+
+    # Save models and scaler
     os.makedirs(save_dir, exist_ok=True)
+    joblib.dump(knn, os.path.join(save_dir, 'knn_model.pkl'))
+    joblib.dump(svm, os.path.join(save_dir, 'svm_model.pkl'))
+    joblib.dump(nb, os.path.join(save_dir, 'naive_bayes_model.pkl'))
+    joblib.dump(scaler, os.path.join(save_dir, 'url_scaler.pkl'))
+    joblib.dump(X.columns.tolist(), os.path.join(save_dir, 'feature_cols.pkl'))
 
+    logging.info(f"Models and scaler saved to: {save_dir}")
+
+    # Evaluate models and store metrics
+    metrics = MLMetrics(
+        id=os.urandom(16).hex(),
+        timestamp=datetime.utcnow(),
+        model_name="KNN",
+        accuracy=knn_acc,
+        precision=precision_score(y_test, knn_pred),
+        recall=recall_score(y_test, knn_pred),
+        f1_score=f1_score(y_test, knn_pred),
+        training_data_size=len(X_train)
+    )
+    db = SessionLocal()
     try:
-        # Load URLs
-        logging.info("Loading dataset...")
-        dataset = load_url_data()
-        if dataset.empty:
-            logging.error("Dataset is empty. Check input files.")
-            return
-
-        # Extract features in parallel 
-        logging.info("Extracting features using parallel processing...")
-        features = process_urls_parallel(dataset['url'], max_workers=50)
-        
-        # Convert features to DataFrame
-        X = pd.DataFrame(features, columns=FIXED_FEATURE_COLUMNS)
-        y = dataset['is_blocked'].values
-
-        # Remove rows with all zero features
-        valid_rows = (X != 0).any(axis=1)
-        X = X[valid_rows]
-        y = y[valid_rows]
-
-        logging.info(f"Successfully processed {len(X)} URLs out of {len(dataset)}")
-
-        # Split and balance dataset
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y
-        )
-        X_train_balanced, y_train_balanced = balance_dataset(X_train, y_train)
-
-        # Scale features with named columns
-        scaler = StandardScaler()
-        X_train_scaled = pd.DataFrame(
-            scaler.fit_transform(X_train_balanced),
-            columns=X_train_balanced.columns
-        )
-        X_test_scaled = pd.DataFrame(
-            scaler.transform(X_test),
-            columns=X_test.columns
-        )
-
-        # Initialize models with multicore support where possible
-        models = {
-            'knn': KNeighborsClassifier(
-                n_neighbors=7,
-                weights='distance',
-                metric='euclidean',
-                n_jobs=-1  # Use all cores
-            ),
-            'svm': SVC(
-                C=0.8,
-                kernel='rbf',
-                gamma='scale',
-                probability=True,
-                class_weight='balanced',
-                max_iter=1000
-            ),
-            'nb': GaussianNB(
-                var_smoothing=1e-8,
-                priors=None
-            )
-        }
-
-        # Train and evaluate each model
-        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        for name, model in models.items():
-            logging.info(f"Training {name} model...")
-            
-            # Cross-validation
-            cv_scores = cross_val_score(model, X_train_scaled, y_train_balanced, cv=cv, scoring='f1', n_jobs=-1)
-            logging.info(f"Cross-validation F1 scores: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
-            
-            # Train final model
-            model.fit(X_train_scaled, y_train_balanced)
-            y_pred = model.predict(X_test_scaled)
-            evaluate_model(y_test, y_pred, name.upper())
-            joblib.dump(model, os.path.join(save_dir, f'{name}_model.pkl'))
-
-        # Create ensemble
-        voting_clf = VotingClassifier(
-            estimators=[
-                ('knn', models['knn']),
-                ('svm', models['svm']), 
-                ('nb', models['nb'])
-            ],
-            voting='soft',
-            weights=[0.25, 0.45, 0.30]  # Weight by performance
-        )
-        
-        logging.info("Training ensemble model...")
-        voting_clf.fit(X_train_scaled, y_train_balanced)
-        y_pred_ensemble = voting_clf.predict(X_test_scaled)
-        evaluate_model(y_test, y_pred_ensemble, "ENSEMBLE")
-        joblib.dump(voting_clf, os.path.join(save_dir, 'ensemble_model.pkl'))
-
-        # Save preprocessing objects with feature names
-        scaler.feature_names_in_ = X_train_balanced.columns
-        joblib.dump(scaler, os.path.join(save_dir, 'url_scaler.pkl'))
-        joblib.dump(list(X_train_balanced.columns), os.path.join(save_dir, 'feature_cols.pkl'))
-
-        logging.info("\nModel training completed successfully!")
-
+        db.add(metrics)
+        db.commit()
+        logging.info("KNN metrics saved to database.")
     except Exception as e:
-        logging.error(f"Error during model training: {e}")
-        raise
+        logging.error(f"Error saving KNN metrics: {e}")
+    finally:
+        db.close()
 
+    # Repeat metrics storage for SVM and Naive Bayes as needed
+    # ...existing code...
+
+# Ensure the main execution calls train_models with the correct directory
 if __name__ == "__main__":
-    train_models()
+    models_save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models', 'latest')
+    train_models(save_dir=models_save_dir)
