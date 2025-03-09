@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -14,34 +14,34 @@ const techData = [
   {
     id: 'knn',
     name: 'K-Nearest Neighbour',
-    description: 'Classifies content based on similarity to known examples, providing flexible and accurate content filtering.',
+    description: 'Classifies content based on similarity to known examples providing flexible and accurate content filtering.',
     icon: Brain,
-    color: 'from-blue-500 to-blue-700',
+    color: 'from-blue-500 to-blue-700'
   },
   {
     id: 'svm',
     name: 'Support Vector Machine',
-    description: 'Creates optimal boundaries between safe and unsafe content, ensuring robust classification.',
+    description: 'Creates optimal boundaries between safe and unsafe content ensuring robust classification.',
     icon: Shield,
-    color: 'from-green-500 to-green-700',
+    color: 'from-green-500 to-green-700'
   },
   {
     id: 'nbc',
     name: 'Naive Bayes Classifier',
     description: 'Utilizes probabilistic approaches to quickly categorize content based on its features.',
     icon: Zap,
-    color: 'from-yellow-500 to-yellow-700',
+    color: 'from-yellow-500 to-yellow-700'
   },
   {
     id: 'dl',
     name: 'Deep Learning Image Analysis',
-    description: 'Employs neural networks to analyze and filter images, protecting against inappropriate visual content.',
+    description: 'Employs neural networks to analyze and filter images protecting against inappropriate visual content.',
     icon: Eye,
-    color: 'from-purple-500 to-purple-700',
-  },
+    color: 'from-purple-500 to-purple-700'
+  }
 ]
 
-export default function TechnologyPage() {
+function TechnologyContent() {
   const [activeTab, setActiveTab] = useState('knn')
   const [showScrollTop, setShowScrollTop] = useState(false)
 
@@ -79,12 +79,12 @@ export default function TechnologyPage() {
       <Navigation />
       <main className="container mx-auto px-4 py-12 space-y-24">
         {/* Hero Section */}
-        <motion.section 
+        <motion.section
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="text-center space-y-8 py-20 relative overflow-hidden"
         >
-          <motion.div 
+          <motion.div
             className="absolute inset-0 z-0"
             style={{
               backgroundImage: 'url("/placeholder.svg?height=1080&width=1920")',
@@ -102,19 +102,19 @@ export default function TechnologyPage() {
               repeatType: "reverse"
             }}
           />
-          <motion.h1 
+          <motion.h1
             className="text-6xl font-extrabold tracking-tight lg:text-7xl bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60 relative z-10"
             style={{ opacity }}
           >
             Cutting-Edge Technology
           </motion.h1>
-          <motion.p 
+          <motion.p
             className="text-2xl text-muted-foreground max-w-3xl mx-auto relative z-10"
             style={{ opacity }}
           >
             Discover how our AI-powered protection keeps your family safe online
           </motion.p>
-          <motion.div 
+          <motion.div
             className="inline-block relative z-10"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
@@ -252,7 +252,7 @@ export default function TechnologyPage() {
           <p className="text-2xl text-muted-foreground max-w-3xl mx-auto">
             Join thousands of families already protected by SafeNet&apos;s advanced technology
           </p>
-          <motion.div 
+          <motion.div
             className="inline-block"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
@@ -283,5 +283,13 @@ export default function TechnologyPage() {
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+export default function TechnologyPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <TechnologyContent />
+    </Suspense>
   )
 }

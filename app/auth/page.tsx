@@ -1,16 +1,16 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SignupForm } from '@/components/auth/SignupForm'
 import { LoginForm } from '@/components/auth/LoginForm'
 import { ForgotPasswordForm } from '@/components/auth/ForgotPasswordForm'
 
-export default function AuthPage() {
-  const [activeTab, setActiveTab] = useState('login')
+function AuthContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
+  const [activeTab, setActiveTab] = useState('login')
 
   useEffect(() => {
     const tab = searchParams.get('tab')
@@ -55,5 +55,13 @@ export default function AuthPage() {
         </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <AuthContent />
+    </Suspense>
   )
 }
